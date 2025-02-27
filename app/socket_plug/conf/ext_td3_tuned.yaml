@@ -65,13 +65,13 @@ model:
         sigma: 0.674
 
 trial:
-  total_timesteps: 10000
+  total_timesteps: 5000
 
   meta_manual_seed: 0
   meta_exp_root: "runs/socket_plug/ext_td3_raw"
   meta_exp_name: "trial"
 
-  eval_freq: 500
+  eval_freq: 250
   eval_num_episodes: 50
   eval_pruner_warmup_ratio: 0.7
 
