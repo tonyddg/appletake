@@ -74,9 +74,15 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
 
         env_object: Union[EnvObjectsBase, Object],
 
+        # 基础环境噪音
+        # 动作噪音
         env_action_noise: Optional[np.ndarray] = None,
+        # 纸箱初始位置噪音
         env_init_box_pos_range: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+        # 相机相对位置噪音
         env_init_vis_pos_range: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+        # 相机观测角噪音 (Coppeliasim 为最大边 FOV)
+        env_vis_persp_deg_disturb: Optional[float] = None,
  
         env_tolerance_offset: float = 0,
         # Checker 长度为 50mm, 因此仅当箱子与垛盘间隙为 51~100 mm (相对原始位置偏移 1~50 mm) 时可通过检查 
@@ -95,6 +101,10 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         self.vis_anchor: Dummy = Dummy("VisAnchor" + name_suffix)
         self.color_camera: VisionSensor= VisionSensor("ColorCamera" + name_suffix)
         self.depth_camera: VisionSensor= VisionSensor("DepthCamera" + name_suffix)
+        self.env_vis_fov_disturb = env_vis_persp_deg_disturb
+
+        self.obs_trans: TransformType = obs_trans
+        self.obs_source: Literal["color", "depth"] = obs_source
 
         self.test_wall = TestWall(
             Shape("TestA" + name_suffix),
@@ -105,18 +115,23 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         self.test_wall.offset_tolerance(env_tolerance_offset)
         self.test_check = Shape("TestCheck" + name_suffix)
 
+        ### 添加扰动前保留初始状态
         # 相对于绝对坐标系 (距离目标位置 10cm)
         self.move_box_origin_pose: np.ndarray = self.move_box.get_pose(None)
         # 认为两个相机位于同一位置, 相对于盒子
         self.vis_anchor_origin_relpose: np.ndarray = self.vis_anchor.get_pose(self.move_box)
+        # 相机初始视场角
+        self.vis_origin_persp_deg: float = 0
+        if self.obs_source == "color":
+            self.vis_origin_persp_deg = self.color_camera.get_perspective_angle()
+        else:
+            self.vis_origin_persp_deg = self.depth_camera.get_perspective_angle()
+
         # 箱子的最佳位置, 用于奖励函数与神经网络构建等
         self.move_box_best_pose = np.copy(self.move_box_origin_pose)
         self.move_box_best_pose[:3] += env_move_box_best_position_offset
         # 转换为 mm 单位
         self.env_move_box_best_position_offset_mm = env_move_box_best_position_offset * 1e3
-
-        self.obs_trans: TransformType = obs_trans
-        self.obs_source: Literal["color", "depth"] = obs_source
 
         self.env_test_in: float = env_test_in
         self.env_max_step: int = env_max_step
@@ -193,6 +208,10 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         self.vis_anchor.set_pose(self.vis_anchor_origin_relpose, self.move_box)
         set_pose6_by_self(self.vis_anchor, pose)
 
+    def _set_vis_fov_offset(self, offset: float):
+        operate_vis = self.color_camera if self.obs_source == "color" else self.depth_camera
+        operate_vis.set_perspective_angle(self.vis_origin_persp_deg + offset)
+
     def _set_init_move_box_pos(
             self,
         ):
@@ -215,11 +234,28 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
             init_pose = sample_vec(self.env_init_vis_pos_range[0], self.env_init_vis_pos_range[1])
             self._set_vis_rel_pose(init_pose)
 
+    def _set_init_vis_fov(
+            self
+        ):
+        '''
+        设置相机初始视场角
+        '''
+        if self.env_vis_fov_disturb:
+            self._set_vis_fov_offset(self.env_vis_fov_disturb * float(np.random.random(1)))
+
     def _set_max_init(self, direct: Literal[0, 1] = 0):
+        '''
+        测试, 用于使用最大扰动初始化环境
+        '''
         if self.env_init_box_pos_range is not None:
             self._set_move_box_abs_pose(self.env_init_box_pos_range[direct])
         if self.env_init_vis_pos_range is not None:
             self._set_vis_rel_pose(self.env_init_vis_pos_range[direct])
+        if self.env_vis_fov_disturb is not None:
+            if direct == 0:
+                self._set_vis_fov_offset(-self.env_vis_fov_disturb)
+            else:
+                self._set_vis_fov_offset(self.env_vis_fov_disturb)
 
     def reset(self):
         '''
@@ -231,6 +267,7 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
 
         self._set_init_move_box_pos()
         self._set_init_vis_pos()
+        self._set_init_vis_fov()
 
     ###
 
@@ -264,26 +301,6 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         if is_truncated or is_alignments or is_collisions:
             self.reset()
         return is_truncated, is_alignments, is_collisions
-
-# def make(
-#     name_suffix: str,
-
-#     obs_trans: TransformType,
-#     obs_source: Literal["color", "depth"],
-
-#     env_object_kwargs: Optional[Dict[str, Any]],
-
-#     env_action_noise: Optional[np.ndarray] = None,
-#     env_init_box_pos: Optional[Tuple[np.ndarray, np.ndarray]] = None,
-#     env_init_vis_pos: Optional[Tuple[np.ndarray, np.ndarray]] = None,
-
-#     env_tolerance_offset: float = 0,
-#     env_test_in: float = 0.05,
-#     env_max_step: int = 20
-# ) -> "PlaneBoxSubenvBase":
-#     '''
-#     通用构建接口
-#     '''
     
 #     raise NotImplementedError
 PlaneBoxSubenvMakeFnType = Callable[[
@@ -395,12 +412,12 @@ step: {self.env._subenv_step}, reward: {self.reward_fn(self.env, is_alignments, 
         obs = self.env.get_obs()
         print(f"obs_mean: {np.mean(obs)}, min: {np.min(obs)}, max: {np.max(obs)}")
         self.axe.imshow(np.squeeze(obs))
-        self.fig.savefig(f"tmp/corner/{get_file_time_str()}_obs.png")
+        self.fig.savefig(f"tmp/plane_box/{get_file_time_str()}_obs.png")
 
     def save_render(self):
         self.axe.clear()
         self.axe.imshow(np.squeeze(self.env.render()))
-        self.fig.savefig(f"tmp/corner/{get_file_time_str()}_render.png")
+        self.fig.savefig(f"tmp/plane_box/{get_file_time_str()}_render.png")
 
     def get_base_key_dict(self) -> KEY_CB_DICT_TYPE:
         return {

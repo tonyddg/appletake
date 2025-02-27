@@ -25,13 +25,15 @@ class CornerSubEnv(PlaneBoxSubenvBase):
         env_action_noise: Optional[np.ndarray] = None,
         env_init_box_pos_range: Optional[Tuple[np.ndarray, np.ndarray]] = None,
         env_init_vis_pos_range: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+        env_vis_persp_deg_disturb: Optional[float] = None,
  
         env_tolerance_offset: float = 0,
         env_test_in: float = 0.05,
         env_max_step: int = 20
     ) -> None:
         super().__init__(
-            name_suffix, obs_trans, obs_source, Shape("Plane" + name_suffix), env_action_noise, env_init_box_pos_range, env_init_vis_pos_range,
+            name_suffix, obs_trans, obs_source, Shape("Plane" + name_suffix), 
+            env_action_noise, env_init_box_pos_range, env_init_vis_pos_range, env_vis_persp_deg_disturb,
             env_tolerance_offset, env_test_in, env_max_step
         )
 
