@@ -217,6 +217,5 @@ class ModelTeacher:
             axes["A"].legend(["Train Acc", "Test Acc"])
 
         fig.savefig(self.save_dir.joinpath(f"train.png").as_posix())
-        torch.save(self.net.state_dict(), self.save_dir.joinpath(f'last.pth').as_posix())
         with open(self.save_dir.joinpath(f"train_curve.npz"), "wb") as f:
             np.savez(f, train_acc = train_acc, test_acc = test_acc, train_loss = train_loss, test_loss = test_loss)
