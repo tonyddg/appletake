@@ -1,0 +1,22 @@
+version: 1
+disable_existing_loggers: False
+formatters:
+  base_fmt:
+    format: '[%(asctime)s] %(message)s'
+    datefmt: '%H:%M:%S'
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: DEBUG
+    formatter: base_fmt
+  file:
+    class: logging.FileHandler
+    level: DEBUG
+    formatter: base_fmt
+    filename: {}
+    encoding: 'utf-8'
+loggers:
+  optuna:
+    # 可通过配置修改记录器, 实现不同场景的切换
+    level: DEBUG
+    handlers: [console, file]

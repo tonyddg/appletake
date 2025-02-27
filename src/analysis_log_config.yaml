@@ -1,0 +1,22 @@
+version: 1
+disable_existing_loggers: False
+formatters:
+  # 性能分析 (level_indent 记录层级)
+  analysis_fmt:
+    format: '%(indent_str)s%(asctime)s|%(funcName)s: %(message)s'
+    datefmt: '%H:%M:%S'
+handlers:
+  # 记录性能分析
+  analysis_hdl:
+    class: logging.FileHandler
+    level: INFO
+    formatter: analysis_fmt
+    # 将日志保存到 log 文件夹等待使用记录日期格式化
+    filename: ""
+    encoding: 'utf-8'
+    delay: true
+loggers:
+  analysis_log:
+    # 可通过配置修改记录器, 实现不同场景的切换
+    level: INFO
+    handlers: [analysis_hdl]

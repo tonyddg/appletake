@@ -1,0 +1,36 @@
+model:
+  type: 'stable_baselines3:TD3'
+  kwargs:
+    policy: "CnnPolicy"
+    policy_kwargs: 
+      net_arch: "${sample.net_arch}"
+
+    batch_size: "${sample.batch_size}"
+    learning_rate: "${sample.learning_rate}"
+    buffer_size: "${sample.buffer_size}"
+    learning_starts: "${sample.learning_starts}"
+
+    train_freq: "${sample.train_freq}"
+    gradient_steps: "${sample.gradient_steps}"
+
+    gamma: 0.9
+    tau: "${sample.tau}"
+
+    "@action_noise":
+      type: "normal_noise"
+      kwargs: 
+        sigma: "${sample.noise_std}"
+
+trial:
+  total_timesteps: 100000
+
+  meta_manual_seed: 0
+  meta_exp_root: "runs/socket_plug/finetuning/vec_td3"
+  meta_exp_name: "trial"
+
+  eval_freq: 10000
+  eval_num_episodes: 50
+  eval_pruner_warmup_ratio: 0.7
+
+  tb_record_episodes: 5
+  tb_record_flag: 'ALL'

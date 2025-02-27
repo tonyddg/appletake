@@ -1,0 +1,45 @@
+train_env:
+  type: 'src.gym_env.socket_plug.socket_plug_vec:SocketPlugVecEnv'
+  kwargs:
+    env_pr: "@pr"
+    subenv_mid_name : "#"
+    subenv_range: [0, 5]
+
+    env_init_pos_min : [-10, -10, 5, -1, -1, -5]
+    env_init_pos_max : [10, 10, 15, 1, 1, 5]
+    env_max_steps : 20
+    env_action_noise: [0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
+
+    obs_type : 'depth'
+    obs_depth_range: [0, 0.010]
+    obs_process: "@ext_trans"
+
+  wrapper:
+    -
+      type: 'src.sb3.vec_wrap:NetFeatObsWrapper'
+      kwargs:
+        net: "@backbone"
+        feat_dim: 1280
+      
+eval_env:
+  type: 'src.gym_env.socket_plug.socket_plug_vec:SocketPlugVecEnv'
+  kwargs:
+    env_pr: "@pr"
+    subenv_mid_name : "#"
+    subenv_range: [0, 5]
+
+    env_init_pos_min : [-10, -10, 5, -1, -1, -5]
+    env_init_pos_max : [10, 10, 15, 1, 1, 5]
+    env_max_steps : 20
+    env_action_noise: [0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
+
+    obs_type : 'depth'
+    obs_depth_range: [0, 0.010]
+    obs_process: "@ext_trans"
+
+  wrapper:
+    -
+      type: 'src.sb3.vec_wrap:NetFeatObsWrapper'
+      kwargs:
+        net: "@backbone"
+        feat_dim: 1280
