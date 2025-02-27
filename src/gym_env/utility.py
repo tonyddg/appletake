@@ -57,15 +57,24 @@ def set_pose6_by_self(obj: Object, pose: np.ndarray):
     使用 [x, y, z, a, b, c] 的向量设置物体相对自身坐标系的新位置
     距离单位为 mm, 角度单位为 deg
     '''
+    assert pose.shape[0] == 6 or pose.shape[0] == 3, "错误的变换表示"
+
     pose = mmdeg_to_mrad(pose)
+
     obj.set_position(pose[:3], obj)
-    obj.set_orientation(pose[3:6], obj)
+    if pose.shape[0] == 6:
+        obj.set_orientation(pose[3:6], obj)
 
 def sample_vec(min_vec: np.ndarray, max_vec: np.ndarray):
     if (max_vec < min_vec).any():
         warn(f"{max_vec} and {min_vec} is not strict", UserWarning)
     res = np.random.random(max_vec.shape)
     return res * (max_vec - min_vec) + min_vec
+
+def sample_float(min_side: float, max_side: float):
+    if max_side < min_side:
+        warn(f"{max_side} and {min_side} is not strict", UserWarning)
+    return float(np.random.random(1)) * (max_side - min_side) + min_side
 
 def depth_normalize(img: np.ndarray, z_min: float, z_far: float):
     '''
