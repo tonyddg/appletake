@@ -1,6 +1,6 @@
 
 from math import ceil
-from typing import Callable, Literal, Optional, Union
+from typing import Any, Callable, List, Literal, Optional, Union
 from torch import nn
 
 import torch
@@ -54,7 +54,7 @@ class DropPath(nn.Module):
     def forward(self, x):
         return drop_path(x, self.drop_prob, self.training)
 
-class BaseConv(nn.Module):
+class ConvBNSiLU(nn.Module):
     def __init__(
             self,
             in_channel: int,
@@ -137,16 +137,16 @@ class MBConvBlock(nn.Module):
 
         self.main_path = nn.Sequential()
 
-        # 1x1 升维卷积
+        # 1x1 升维卷积 (尽在需要提高维度时使用)
         if expanded_ratio != 1:
             self.main_path.append(
-                BaseConv(
+                ConvBNSiLU(
                     in_channel, exp_channel, 1
                 ),
             )
         # kxk 逐层卷积
         self.main_path.append(
-            BaseConv(
+            ConvBNSiLU(
                 exp_channel, exp_channel, kernel, stride, groups = exp_channel
             ),
         )
@@ -158,7 +158,7 @@ class MBConvBlock(nn.Module):
         )
         # 1x1 映射降维卷积 (不使用激活函数)
         self.main_path.append(
-            BaseConv(
+            ConvBNSiLU(
                 exp_channel, out_channel, 1, is_use_active_fn = False
             ),
         )
@@ -172,9 +172,57 @@ class MBConvBlock(nn.Module):
         else:
             return self.main_path(X)
 
+class FusedMBConvBlock(nn.Module):
+    def __init__(
+            self,
+            kernel: int,             # 3      (保持接口同一)
+            in_channel: int,         # 输入MBConv的channel数
+            out_channel: int,        # MBConv输出的channel数
+            expanded_ratio: int,     # 1 or 6     变胖倍数
+            stride: int,             # 1 or 2
+            drop_rate: float,        # MBConv中的随机失活比例
+        ) -> None:
+        '''
+        EfficientNetV2 使用的 FusedMBConvBlock
+        虽然提高了参数量, 但可以解决 MBConvBlock 在特征尺寸较大时逐层卷积与 SEBlock 计算慢的问题
+        '''
+        super().__init__()
+
+        in_channel = in_channel
+        out_channel = out_channel
+        exp_channel = in_channel * expanded_ratio
+        # 仅当 stride == 1 且输入输出通道相同时使用残差连接
+        self.is_use_res_shortcut_path = ((stride == 1) and (in_channel == out_channel))
+
+        self.main_path = nn.Sequential()
+
+        # 3x3 普通卷积代替升维与逐层卷积
+        self.main_path.append(
+            ConvBNSiLU(
+                in_channel, exp_channel, kernel, stride
+            ),
+        )
+        # 1x1 映射降维卷积 (膨胀系数为 1 时不再降维)
+        if expanded_ratio != 1:
+            self.main_path.append(
+                ConvBNSiLU(
+                    exp_channel, out_channel, 1, is_use_active_fn = False
+                ),
+            )
+        # 通过 DropPath类 实现 MBConv 中的 dropout (仅在残差连接时使用)
+        if self.is_use_res_shortcut_path and drop_rate > 0:
+            self.main_path.append(DropPath(drop_rate))  
+
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
+        if self.is_use_res_shortcut_path:
+            return self.main_path(X) + X
+        else:
+            return self.main_path(X)
+
 class MBConvStage(nn.Module):
     def __init__(
             self,
+            mbconv_block_type: Union[type[MBConvBlock], type[FusedMBConvBlock]],
             kernal: int, 
             in_channel: int,
             out_channel: int, 
@@ -183,24 +231,17 @@ class MBConvStage(nn.Module):
             repeate: int,
             base_drop_rate: float,
             start_drop_rate: float
-            # drop_rate: float,
-            # # drop rate 按块逐步提升
-            # block_ind: int,
-            # num_blocks: int
         ) -> None:
         super().__init__()
-
-        # base_drop_rate = drop_rate / num_blocks
-        # cur_drop_rate = block_ind * base_drop_rate
 
         self.stage = nn.Sequential()
         for i in range(repeate):
             if i == 0:
-                self.stage.append(MBConvBlock(
+                self.stage.append(mbconv_block_type(
                     kernal, in_channel, out_channel, expand_ratio, stride, start_drop_rate
                 ))
             else:
-                self.stage.append(MBConvBlock(
+                self.stage.append(mbconv_block_type(
                     kernal, out_channel, out_channel, expand_ratio, 1, start_drop_rate
                 ))       
 
@@ -211,7 +252,7 @@ class MBConvStage(nn.Module):
         # print(res.shape)
         return res
 
-class EfficientNetBackbone(nn.Module):
+class EfficientNetV1Backbone(nn.Module):
     def __init__(self,
                  in_channel: int,
                  width_coefficient: float,          # 宽度倍率因子 (特征通道数)
@@ -242,7 +283,7 @@ class EfficientNetBackbone(nn.Module):
         start_drop_rate: float = 0
 
         _stage_out_channel = _make_divisible(stem_out_channel * width_coefficient)
-        self.stem = BaseConv(
+        self.stem = ConvBNSiLU(
             in_channel, _stage_out_channel,
             kernel_size = 3, stride = 2
         )
@@ -251,7 +292,7 @@ class EfficientNetBackbone(nn.Module):
         for cnf in stage_cnf:
             self.body.append(
                 MBConvStage(
-                    cnf[0], _stage_out_channel, cnf[1], cnf[2], cnf[3], cnf[4], base_drop_rate, start_drop_rate
+                    MBConvBlock, cnf[0], _stage_out_channel, cnf[1], cnf[2], cnf[3], cnf[4], base_drop_rate, start_drop_rate
                 )
             )
             # drop out 根据块位置逐步增加
@@ -260,7 +301,7 @@ class EfficientNetBackbone(nn.Module):
 
         self.out_feat_size = _make_divisible(head_out_feat * width_coefficient)
         self.head = nn.Sequential(
-            BaseConv(
+            ConvBNSiLU(
                 _stage_out_channel, self.out_feat_size ,
                 1, 1
             ),
@@ -276,9 +317,129 @@ class EfficientNetBackbone(nn.Module):
             elif isinstance(m, nn.BatchNorm2d):
                 nn.init.ones_(m.weight)
                 nn.init.zeros_(m.bias)
-            # elif isinstance(m, nn.Linear):
-            #     nn.init.normal_(m.weight, 0, 0.01)
-            #     nn.init.zeros_(m.bias)
+
+    def forward(self, X):
+        X = self.stem(X)
+        X = self.body(X)
+        return self.head(X)
+    
+    def get_out_feat_size(self):
+        return self.out_feat_size 
+
+EFFNET_V2_STAGE_CNF = {
+    # is_fused, out_channel, expand_ratio, stride, repeate
+    "s": { # 384
+            "stage_cnf" : [[FusedMBConvBlock, 24 , 1, 1, 2],
+                           [FusedMBConvBlock, 48 , 4, 2, 4],
+                           [FusedMBConvBlock, 64 , 4, 2, 4],
+                           [MBConvBlock     , 128, 4, 2, 6],
+                           [MBConvBlock     , 160, 6, 1, 9],
+                           [MBConvBlock     , 256, 6, 2, 15]],
+            "stem_out_ch": 24,
+            "drop_connect_rate": 0.2
+        },
+
+    "m": { # 384
+            "stage_cnf" : [[FusedMBConvBlock, 24 , 1, 1, 3],
+                           [FusedMBConvBlock, 48 , 4, 2, 5],
+                           [FusedMBConvBlock, 80 , 4, 2, 5],
+                           [MBConvBlock     , 160, 4, 2, 7],
+                           [MBConvBlock     , 176, 6, 1, 14],
+                           [MBConvBlock     , 304, 6, 2, 18],
+                           [MBConvBlock     , 512, 6, 1, 5]],
+            "stem_out_ch": 24,
+            "drop_connect_rate": 0.3
+        },
+
+    "l": { # 384
+            "stage_cnf" : [[FusedMBConvBlock, 32 , 1, 1, 4],
+                           [FusedMBConvBlock, 64 , 4, 2, 7],
+                           [FusedMBConvBlock, 96 , 4, 2, 7],
+                           [MBConvBlock     , 192, 4, 2, 10],
+                           [MBConvBlock     , 224, 6, 1, 19],
+                           [MBConvBlock     , 384, 6, 2, 25],
+                           [MBConvBlock     , 640, 6, 1, 7]],
+            "stem_out_ch": 32,
+            "drop_connect_rate": 0.4,
+        },
+
+    "xl":{ # 384
+            "stage_cnf" : [[FusedMBConvBlock, 32 , 1, 1, 4],
+                           [FusedMBConvBlock, 64 , 4, 2, 7],
+                           [FusedMBConvBlock, 96 , 4, 2, 7],
+                           [MBConvBlock     , 192, 4, 2, 10],
+                           [MBConvBlock     , 224, 6, 1, 19],
+                           [MBConvBlock     , 384, 6, 2, 25],
+                           [MBConvBlock     , 640, 6, 1, 7]],
+            "stem_out_ch": 32,
+            "drop_connect_rate": 0.4
+        },
+}
+
+class EfficientNetV2Backbone(nn.Module):
+    def __init__(self,
+                 in_channel: int,
+                 stage_cnf: List[Any],
+                 stem_out_ch: int,
+                 drop_connect_rate: float = 0.2,    # 控制 SE 模块里的 dropout
+                 ):
+        super().__init__()
+
+        stem_out_channel = stem_out_ch
+        head_out_feat = 1280
+        
+        stage_cnf = [[FusedMBConvBlock, 24 , 1, 1, 2],
+                     [FusedMBConvBlock, 48 , 4, 2, 4],
+                     [FusedMBConvBlock, 64 , 4, 2, 4],
+                     [MBConvBlock     , 128, 4, 2, 6],
+                     [MBConvBlock     , 160, 6, 1, 9],
+                     [MBConvBlock     , 256, 6, 2, 15]]
+        
+        # 基于两个因子调整基础配置
+        _num_blocks = 0
+        for i in range(len(stage_cnf)):
+            stage_cnf[i][1] = stage_cnf[i][1]
+            stage_cnf[i][4] = stage_cnf[i][4]
+            _num_blocks += stage_cnf[i][4]
+
+        base_drop_rate: float = drop_connect_rate / _num_blocks
+        start_drop_rate: float = 0
+
+        _stage_out_channel = stem_out_channel
+        self.stem = ConvBNSiLU(
+            in_channel, _stage_out_channel,
+            kernel_size = 3, stride = 2
+        )
+
+        self.body = nn.Sequential()
+        for cnf in stage_cnf:
+            self.body.append(
+                MBConvStage(
+                    cnf[0], 3, _stage_out_channel, cnf[1], cnf[2], cnf[3], cnf[4], base_drop_rate, start_drop_rate
+                )
+            )
+            # drop out 根据块位置逐步增加
+            start_drop_rate += base_drop_rate * cnf[4]
+            _stage_out_channel = cnf[1]
+
+        self.out_feat_size = head_out_feat
+        self.head = nn.Sequential(
+            ConvBNSiLU(
+                _stage_out_channel, self.out_feat_size ,
+                1, 1
+            ),
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten()
+        )
+
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode = "fan_out")
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
 
     def forward(self, X):
         X = self.stem(X)
@@ -288,24 +449,24 @@ class EfficientNetBackbone(nn.Module):
     def get_out_feat_size(self):
         return self.out_feat_size 
     
-class EfficientNetWithHead(nn.Module):
+class EfficientNetV1WithHead(nn.Module):
     def __init__(self,
                  num_classes: int,
                  in_channel: int,
                  width_coefficient: float,          # 宽度倍率因子 (特征通道数)
                  depth_coefficient: float,          # 深度倍率因子 (Stage 深度)
                  drop_connect_rate: float = 0.2,    # 控制 SE 模块里的 dropout
-                 cls_drop_out: float = 0.2,
+                 head_drop_out: float = 0.2,
                  ):
         super().__init__()
-        self.backbone = EfficientNetBackbone(
+        self.backbone = EfficientNetV1Backbone(
             in_channel,
             width_coefficient,      
             depth_coefficient,      
             drop_connect_rate
         )
         self.cls_head = nn.Sequential(
-            nn.Dropout(cls_drop_out, True),
+            nn.Dropout(head_drop_out, True),
             nn.Linear(
                 self.backbone.get_out_feat_size(), num_classes
             )
@@ -323,43 +484,42 @@ class EfficientNetWithHead(nn.Module):
         device = str(next(self.parameters()).device)
         torchsummary.summary(self, (3, 224, 224), device = device)
 
-# class EfficientNetClassifier(nn.Module):
-#     def __init__(self,
-#                  num_classes: int,
-#                  in_channel: int,
-#                  width_coefficient: float,          # 宽度倍率因子 (特征通道数)
-#                  depth_coefficient: float,          # 深度倍率因子 (Stage 深度)
-#                  drop_connect_rate: float = 0.2,    # 控制 SE 模块里的 dropout
-#                  cls_drop_out: float = 0.2,
-#                  ):
-#         super().__init__()
-#         self.backbone = EfficientNetBackbone(
-#             in_channel,
-#             width_coefficient,      
-#             depth_coefficient,      
-#             drop_connect_rate
-#         )
-#         self.cls_head = nn.Sequential(
-#             nn.Dropout(cls_drop_out, True),
-#             nn.Linear(
-#                 self.backbone.get_out_feat_size(), num_classes
-#             )
-#         )
+class EfficientNetV2WithHead(nn.Module):
+    def __init__(self,
+                 num_classes: int,
+                 in_channel: int,
+                 stage_cnf: List[Any],
+                 stem_out_ch: int,
+                 drop_connect_rate: float = 0.2,
+                 ):
+        super().__init__()
+        self.backbone = EfficientNetV2Backbone(
+            in_channel,
+            stage_cnf,
+            stem_out_ch,
+            drop_connect_rate,
+        )
+        self.cls_head = nn.Sequential(
+            nn.Dropout(drop_connect_rate, True),
+            nn.Linear(
+                self.backbone.get_out_feat_size(), num_classes
+            )
+        )
 
-#         nn.init.normal_(self.cls_head[1].weight, 0, 0.01) # type: ignore
-#         nn.init.zeros_(self.cls_head[1].bias) # type: ignore
+        nn.init.normal_(self.cls_head[1].weight, 0, 0.01) # type: ignore
+        nn.init.zeros_(self.cls_head[1].bias) # type: ignore
 
-#     def forward(self, X):
-#         X = self.backbone(X)
-#         # print(X.shape)
-#         return self.cls_head(X)
+    def forward(self, X):
+        X = self.backbone(X)
+        # print(X.shape)
+        return self.cls_head(X)
 
-#     def review(self):
-#         device = str(next(self.parameters()).device)
-#         torchsummary.summary(self, (3, 224, 224), device = device)
+    def review(self):
+        device = str(next(self.parameters()).device)
+        torchsummary.summary(self, (3, 384, 384), device = device)
 
 if __name__ == "__main__":
-    net = EfficientNetWithHead(
-        1000, 3, 1.1, 1.2, 0.3
+    net = EfficientNetV2WithHead(
+        1000, 3, **EFFNET_V2_STAGE_CNF["s"] # type: ignore
     )
     net.review()
