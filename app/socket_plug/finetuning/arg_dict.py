@@ -7,15 +7,15 @@ from src.gym_env.aug import get_crop_resize, get_depth_aug, get_hwc2chw
 from stable_baselines3.common.noise import NormalActionNoise
 import numpy as np
 
-from src.net.efficient_net import EfficientNetWithHead
+from src.net.efficient_net import EfficientNetV1WithHead
 from src.utility import dict_factory
 
 import torch
 
-effnet_b0 = EfficientNetWithHead(
+effnet_b0 = EfficientNetV1WithHead(
     6, 1, 1, 1
 )
-effnet_b0.load_state_dict(torch.load("runs/train_net/socket_plug/best.pth"))
+effnet_b0.load_state_dict(torch.load("runs/socket_plug/ext/2025_02_27_12_34_23/best.pth"))
 effnet_b0.to(device = "cuda")
 effnet_b0.train(False)
 effnet_b0_backbone = effnet_b0.backbone
@@ -27,7 +27,7 @@ exp_replace_arg_dict = dict_factory({
     ]),
     'ext_trans': A.Compose([
         get_crop_resize(),
-        get_depth_aug(0.2, 1),
+        get_depth_aug(1, 1),
         A.Normalize((0.538), (0.287), 1),
         get_hwc2chw(False)
     ]),

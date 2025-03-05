@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 from src.net.pr_task_dataset import PrEnvRenderDataset
 from src.net.utility import ModelTeacher
-from src.net.efficient_net import EfficientNetWithHead
+from src.net.efficient_net import EfficientNetV1WithHead
 
 from src.gym_env.socket_plug.socket_plug_vec import SocketPlugVecEnv
 from src.gym_env.aug import get_crop_resize, get_depth_aug, get_hwc2chw
@@ -62,12 +62,12 @@ if __name__ == "__main__":
     )
     test_dl = DataLoader(test_dataset, 64, num_workers = 2)
 
-    effnet_b0 = EfficientNetWithHead(
+    effnet_b0 = EfficientNetV1WithHead(
         6, 1, 1, 1
     )
 
     cfg = ModelTeacher.AdvanceConfig(
-        use_schedule = True,
+        schedule_type = True,
         is_use_adam = False
     )
 

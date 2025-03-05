@@ -11,10 +11,10 @@ if __name__ == "__main__":
 
         train_model(
             load_exp_config(
-                "app/socket_plug/conf/vec_td3_tuned.yaml",
+                "app/socket_plug/conf/ext_td3_tuned.yaml",
             ),
             verbose = 1,
-            exp_root = "runs/socket_plug/train/vec_td3",
+            exp_root = "runs/socket_plug/train/ext_td3",
             exp_replace_arg_dict = exp_replace_arg_dict({
                 "pr": pr
             }),
