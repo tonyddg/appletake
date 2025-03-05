@@ -1,13 +1,21 @@
+from pathlib import Path
 import signal
-from typing import Any, Dict, Iterator, List
+from typing import Any, Dict, Iterator, List, Optional, Union
 import numpy as np
 import torch
 from torch.utils.data import IterableDataset
 from pyrep import PyRep
+from torch.utils.data import DataLoader
+
+from matplotlib import pyplot as plt
+
+import time
 
 import atexit
-
 from abc import abstractmethod, ABCMeta
+
+from src.utility import get_file_time_str
+
 
 class PrTaskVecEnvForDatasetInterface(metaclass = ABCMeta):
     '''
@@ -69,12 +77,12 @@ class PrEnvRenderDataset(IterableDataset):
         self.num_epoch_data = num_epoch_data
 
     def __iter__(self) -> Iterator:
-        return SocketPlugRenderIter(self.pr_env_type, self.scene_path, self.env_kwargs, self.num_epoch_data)
+        return PrEnvRenderIter(self.pr_env_type, self.scene_path, self.env_kwargs, self.num_epoch_data)
 
     def __len__(self):
         return self.num_epoch_data
 
-class SocketPlugRenderIter(Iterator):
+class PrEnvRenderIter(Iterator):
     def __init__(
             self, 
             pr_env_type: type["PrTaskVecEnvForDatasetInterface"],
@@ -97,13 +105,13 @@ class SocketPlugRenderIter(Iterator):
         else:
             num_workers = 1
 
+        self.is_close = False
         self.num_epoch_data = num_epoch_data // num_workers
         self.iter_epoch_data = 0
 
         signal.signal(signal.SIGINT, self._sig_exit_handler)
         signal.signal(signal.SIGTERM, self._sig_exit_handler)
         atexit.register(self.close)
-        self.is_close = False
 
         self.sample_data()
 
@@ -145,3 +153,54 @@ class SocketPlugRenderIter(Iterator):
         label = self.cache_label[self.cur_idx - 1]
 
         return obs, label
+    
+def sample_test(dataset: PrEnvRenderDataset, sample_times: int, sample_savepath: Optional[Union[Path, str]], num_workers: int = 2, batchsize: int = 64, alpha: float = 0.98):
+    
+    dl = DataLoader(dataset, batchsize, num_workers = num_workers)
+    
+    moving_obs_mean, moving_obs_std = 0, 0
+    moving_label_mean, moving_label_std = 0, 0
+
+    last_obs = None
+    last_label = None
+
+    print("Sample Start")
+    t_start = time.perf_counter()
+    for i, (obs, label) in enumerate(dl):
+        batch_obs_std, batch_obs_mean = torch.std_mean(obs)
+        batch_label_std, batch_label_mean = torch.std_mean(label, 0)
+
+        moving_obs_mean = moving_obs_mean * alpha + batch_obs_mean * (1 - alpha)
+        moving_obs_std = moving_obs_std * alpha + batch_obs_std * (1 - alpha)
+        moving_label_mean = moving_label_mean * alpha + batch_label_mean * (1 - alpha)
+        moving_label_std = moving_label_std * alpha + batch_label_std * (1 - alpha)
+
+        if i >= sample_times:
+            last_obs = obs
+            last_label = label
+            break
+
+    avg_sample_times = (time.perf_counter() - t_start) / sample_times
+    print("Sample Over")
+
+    if sample_savepath is not None:
+        assert isinstance(last_obs, torch.Tensor)
+        assert isinstance(last_label, torch.Tensor)
+
+        fig, axes = plt.subplot_mosaic([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+        fig.set_layout_engine("compressed")
+        fig.set_size_inches(32, 24)
+
+        for i, axe in enumerate(axes.values()):
+            img = torch.squeeze(last_obs[i]).cpu().numpy()
+            axe.imshow(img)
+            axe.set_title(f"label: {str(last_label[i])}")
+            axe.set_xticks([])
+            axe.set_yticks([])
+        
+        sample_savepath = Path(sample_savepath)
+        fig.savefig(sample_savepath.joinpath(get_file_time_str() + ".png").as_posix())
+    
+    print(f"sample speed: {avg_sample_times}s/batch")
+    print(f"obs mean: {moving_obs_mean}, obs std: {moving_obs_std}")
+    print(f"label mean: {moving_label_mean}, label std: {moving_label_std}")

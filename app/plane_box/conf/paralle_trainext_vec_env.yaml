@@ -1,20 +1,20 @@
 train_env:
-  type: 'src.gym_env.plane_box.corner:CornerEnv'
+  type: 'src.gym_env.plane_box.paralle:ParalleEnv'
   kwargs:
     env_pr: "@pr"
     subenv_mid_name : "#"
     subenv_range: [0, 4]
 
-    obs_trans: "@corner_vec_trans"
+    obs_trans: "@paralle_ext_train_trans"
     obs_source: "depth"
 
     env_init_box_pos_range: [
-        [-25, -25, 15, -2, -2, -5],
-        [25, 25, 35, 2, 2, 5]
+        [-40, -40, 0, -5, -5, -10],
+        [40, 40, 50, 5, 5, 10]
     ]
     env_init_vis_pos_range: [
-        [-5, -5, -5, -2, -2, -5],
-        [5, 5, 5, 2, 2, 5]
+        [-10, -10, -10, -5, -5, -10],
+        [10, 10, 10, 5, 5, 10]
     ]
     env_action_noise: [
       0.5, 0.5, 0.5, 0.1, 0.1, 0.1
@@ -25,28 +25,32 @@ train_env:
     env_reward_fn: "@reward_dist_fn"
     act_unit: [5, 5, 5, 1, 1, 1]
 
-    corner_plane_height_offset_range: [-0.03, 0.03]
+    paralle_fixbox_size_offset_range:
+      - [-0.03, -0.03, 0]
+      - [0.15, 0.15, 0.05]
 
-    env_tolerance_offset: -0.005
+    # no center
+    env_tolerance_offset: -0.01
 
   wrapper: ~
+
 eval_env:
-  type: 'src.gym_env.plane_box.corner:CornerEnv'
+  type: 'src.gym_env.plane_box.paralle:ParalleEnv'
   kwargs:
     env_pr: "@pr"
     subenv_mid_name : "#"
-    subenv_range: [4, 6]
+    subenv_range: [0, 4]
 
-    obs_trans: "@corner_vec_trans"
+    obs_trans: "@paralle_ext_trans"
     obs_source: "depth"
 
     env_init_box_pos_range: [
-        [-25, -25, 15, -2, -2, -5],
-        [25, 25, 35, 2, 2, 5]
+        [-40, -40, 0, -5, -5, -10],
+        [40, 40, 50, 5, 5, 10]
     ]
     env_init_vis_pos_range: [
-        [-5, -5, -5, -2, -2, -5],
-        [5, 5, 5, 2, 2, 5]
+        [-10, -10, -10, -5, -5, -10],
+        [10, 10, 10, 5, 5, 10]
     ]
     env_action_noise: [
       0.5, 0.5, 0.5, 0.1, 0.1, 0.1
@@ -57,8 +61,11 @@ eval_env:
     env_reward_fn: "@reward_dist_fn"
     act_unit: [5, 5, 5, 1, 1, 1]
 
-    corner_plane_height_offset_range: [-0.03, 0.03]
+    paralle_fixbox_size_offset_range:
+      - [-0.03, -0.03, 0]
+      - [0.15, 0.15, 0.05]
 
-    env_tolerance_offset: -0.005
+    # no center
+    env_tolerance_offset: -0.01
 
   wrapper: ~

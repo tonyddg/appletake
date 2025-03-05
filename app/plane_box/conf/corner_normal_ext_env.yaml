@@ -5,7 +5,7 @@ train_env:
     subenv_mid_name : "#"
     subenv_range: [0, 4]
 
-    obs_trans: "@corner_vec_trans"
+    obs_trans: "@corner_ext_trans"
     obs_source: "depth"
 
     env_init_box_pos_range: [
@@ -29,7 +29,16 @@ train_env:
 
     env_tolerance_offset: -0.005
 
-  wrapper: ~
+  wrapper: 
+    -
+      type: 'src.sb3.vec_wrap:NetFeatObsWrapper'
+      kwargs:
+        "@net": 
+          type: "make_backbone"
+          kwargs:
+            path: "runs/plane_box/corner_ext/2025_03_03_20_40_58/best.pth"
+        feat_dim: 1280
+
 eval_env:
   type: 'src.gym_env.plane_box.corner:CornerEnv'
   kwargs:
@@ -37,7 +46,7 @@ eval_env:
     subenv_mid_name : "#"
     subenv_range: [4, 6]
 
-    obs_trans: "@corner_vec_trans"
+    obs_trans: "@corner_ext_trans"
     obs_source: "depth"
 
     env_init_box_pos_range: [
@@ -61,4 +70,12 @@ eval_env:
 
     env_tolerance_offset: -0.005
 
-  wrapper: ~
+  wrapper: 
+    -
+      type: 'src.sb3.vec_wrap:NetFeatObsWrapper'
+      kwargs:
+        "@net": 
+          type: "make_backbone"
+          kwargs:
+            path: "runs/plane_box/corner_ext/2025_03_03_20_40_58/best.pth"
+        feat_dim: 1280

@@ -1,11 +1,11 @@
 train_env:
-  type: 'src.gym_env.plane_box.corner:CornerEnv'
+  type: 'src.gym_env.plane_box.paralle:ParalleEnv'
   kwargs:
     env_pr: "@pr"
     subenv_mid_name : "#"
     subenv_range: [0, 4]
 
-    obs_trans: "@corner_vec_trans"
+    obs_trans: "@paralle_vec_trans"
     obs_source: "depth"
 
     env_init_box_pos_range: [
@@ -25,19 +25,22 @@ train_env:
     env_reward_fn: "@reward_dist_fn"
     act_unit: [5, 5, 5, 1, 1, 1]
 
-    corner_plane_height_offset_range: [-0.03, 0.03]
+    paralle_fixbox_size_offset_range:
+      - [-0.03, -0.03, 0]
+      - [0.15, 0.15, 0.05]
 
     env_tolerance_offset: -0.005
 
   wrapper: ~
+
 eval_env:
-  type: 'src.gym_env.plane_box.corner:CornerEnv'
+  type: 'src.gym_env.plane_box.paralle:ParalleEnv'
   kwargs:
     env_pr: "@pr"
     subenv_mid_name : "#"
     subenv_range: [4, 6]
 
-    obs_trans: "@corner_vec_trans"
+    obs_trans: "@paralle_vec_trans"
     obs_source: "depth"
 
     env_init_box_pos_range: [
@@ -57,7 +60,9 @@ eval_env:
     env_reward_fn: "@reward_dist_fn"
     act_unit: [5, 5, 5, 1, 1, 1]
 
-    corner_plane_height_offset_range: [-0.03, 0.03]
+    paralle_fixbox_size_offset_range:
+      - [-0.03, -0.03, 0]
+      - [0.15, 0.15, 0.05]
 
     env_tolerance_offset: -0.005
 

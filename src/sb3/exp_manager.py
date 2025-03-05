@@ -195,12 +195,17 @@ def parse_exp_config(cfg: DictConfig, replace_arg_dict: Optional[Dict[str, Any]]
     return ObjectiveArgs(model, train_env, eval_env, trial_args) # type: ignore
 
 def load_exp_config(*cfg_file_list: Union[str, Path], merge_dict: Dict[str, Any] = {}):
-    merge_cfg = OmegaConf.create(merge_dict)
+    '''
+    * `merge_dict` 优先级最高
+    * 越先传入的配置优先级越低
+    '''
+    merge_cfg = OmegaConf.create({})
     for cfg_file in cfg_file_list:
         with open(cfg_file) as f:
             cfg = OmegaConf.load(f)
         merge_cfg = OmegaConf.merge(merge_cfg, cfg)
 
+    merge_cfg = OmegaConf.merge(merge_cfg, OmegaConf.create(merge_dict))
     assert isinstance(merge_cfg, DictConfig), "配置文件格式不正确"
     return merge_cfg
 
@@ -438,7 +443,9 @@ def train_model(
         opt_record_train_return: bool = True,
 
         exp_replace_arg_dict: Optional[Dict[str, Any]] = None,
-        exp_exec_arg_dict: Optional[Dict[str, Callable[[Any], Any]]] = None
+        exp_exec_arg_dict: Optional[Dict[str, Callable[[Any], Any]]] = None,
+
+        trial_time_ratio: Optional[float] = None
     ) -> None:
 
     exp_root = Path(exp_root)
@@ -458,6 +465,10 @@ def train_model(
     if opt_save_opt:
         with open(exp_root.joinpath("config.yaml"), 'w') as f:
             OmegaConf.save(exp_conf, f)
+    
+    if trial_time_ratio is not None:
+        exp_conf.trial.total_timesteps = int(exp_conf.trial.total_timesteps * trial_time_ratio)
+        exp_conf.trial.eval_freq = int(exp_conf.trial.eval_freq * trial_time_ratio)
 
     # 设置随机种子
     set_random_seed(int(exp_conf.trial.meta_manual_seed), True)

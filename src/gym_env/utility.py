@@ -1,3 +1,4 @@
+from typing import Optional, Union
 from warnings import warn
 import numpy as np
 from scipy.spatial.transform import Rotation as R
@@ -63,12 +64,12 @@ def set_pose6_by_self(obj: Object, pose: np.ndarray):
 
     obj.set_position(pose[:3], obj)
     if pose.shape[0] == 6:
-        obj.set_orientation(pose[3:6], obj)
+        obj.set_orientation(pose[3:], obj)
 
 def sample_vec(min_vec: np.ndarray, max_vec: np.ndarray):
     if (max_vec < min_vec).any():
         warn(f"{max_vec} and {min_vec} is not strict", UserWarning)
-    res = np.random.random(max_vec.shape)
+    res = np.asarray(np.random.random(max_vec.shape), np.float32)
     return res * (max_vec - min_vec) + min_vec
 
 def sample_float(min_side: float, max_side: float):

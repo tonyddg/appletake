@@ -41,28 +41,33 @@ def get_depth_aug(noise_p: float, noise_scale: float = 1):
 
         # 模拟深度估计误差
         A.MotionBlur(
-            int(3 * noise_scale), p = noise_p
+            (int(2 * noise_scale + 1), int(2 * noise_scale + 3)), p = noise_p
         ),
         A.GaussNoise(
-            (0.02 * noise_scale, 0.05 * noise_scale),
+            (0.01 * noise_scale, 0.05 * noise_scale),
             noise_scale_factor = 1,
             p = noise_p
         ),
 
-        # 模拟无法填充的空洞
+        # 模拟无法填充的空洞 (防止模型仅关注特定区域)
         A.CoarseDropout(
-            num_holes_range = (1, int(5 * noise_scale)),
-            hole_height_range = (0.05 / noise_scale, 0.2 * noise_scale),
-            hole_width_range = (0.05 / noise_scale, 0.2 * noise_scale),
+            num_holes_range = (1, int(3 * noise_scale)),
+            hole_height_range = (0.05 * noise_scale, 0.15 * noise_scale),
+            hole_width_range = (0.05 * noise_scale, 0.15 * noise_scale),
+            fill = 0,
+            p = noise_p
+        ),
+        A.CoarseDropout(
+            num_holes_range = (1, int(3 * noise_scale)),
+            hole_height_range = (0.04 * noise_scale, 0.08 * noise_scale),
+            hole_width_range = (0.04 * noise_scale, 0.08 * noise_scale),
+            fill = 1,
             p = noise_p
         ),
 
-        # 传感器噪声
-        A.SaltAndPepper((0.0005 * noise_scale, 0.001 * noise_scale), p = noise_p),
-
         # 模拟小空洞填充
-        A.Morphological((5, 5), p = 1),
-        A.MedianBlur(3, p = noise_p),
+        A.Morphological((4, 6), p = noise_p),
+        A.MedianBlur((9, 15), p = noise_p),
     ], p = 1)
 
 def _hwc2chw(img: np.ndarray, to_sb3: bool = False, **param):

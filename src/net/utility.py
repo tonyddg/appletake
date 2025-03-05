@@ -1,5 +1,6 @@
+import math
 import os
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Dict, Literal, Optional, Union
 
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from torch import optim
 from torch.utils.data import DataLoader
 
 from tqdm import tqdm
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -25,17 +26,34 @@ def init_weights(m: nn.Module):
         nn.init.xavier_uniform_(m.weight)
 
 def cls_acc_success_fn(y_predict: torch.Tensor, y_target: torch.Tensor):
-    return torch.mean((torch.argmax(y_predict, 1) == y_target).type(torch.float32)).item()
+    with torch.no_grad():
+        return torch.mean((torch.argmax(y_predict, 1) == y_target).type(torch.float32)).item()
 
-def get_report_dict(i: int, accurate_loss: float, accurate_acc: Optional[float]):
+def reg_mse_success_fn(y_predict: torch.Tensor, y_target: torch.Tensor):
+    with torch.no_grad():
+        return -nn.functional.mse_loss(y_predict, y_target).item()
+
+def get_report_dict(is_train: bool, i: int, accurate_loss: float, accurate_acc: Optional[float]):
+    epoch_type = "train" if is_train else "eval"
+    
     report = {
-        "train loss": f"{accurate_loss / (i + 1):.3f}",
+        f"{epoch_type} loss": f"{accurate_loss / (i + 1):.3f}",
     }
     if accurate_acc is not None:
         report.update({
-            "train acc": f"{accurate_acc / (i + 1):.3f}"
+            f"{epoch_type} acc": f"{accurate_acc / (i + 1):.3f}"
         })
     return report
+
+def WarmUpCosineLR(optimizer: optim.Optimizer, warmup_epoch: int, T_max: int, eta_min_rate: float):
+    def get_init_lr_times(epoch: int):
+        if epoch < warmup_epoch:
+            return epoch / warmup_epoch
+        else:
+            epoch -= warmup_epoch
+            return eta_min_rate + 0.5 * (1 - eta_min_rate) * (1 + math.cos((epoch / T_max) * torch.pi))
+
+    return optim.lr_scheduler.LambdaLR(optimizer, get_init_lr_times)
 
 class ModelTeacher:
 
@@ -44,9 +62,25 @@ class ModelTeacher:
         weight_decay: float = 5e-6
         momentum: float = 0.99
         is_use_adam: bool = True
-        use_schedule: bool = False
-        lr_period: int = 5
-        lr_decay: float = 0.9
+        # stepLR 小周期简单分类
+        # WarmUp + CosineAnnealing 大周期复杂回归 (自实现)
+        # CosineAnnealingWarmRestarts 噪音复杂回归
+        schedule_type: Optional[Literal["step", "warm_cos", "restart_cos"]] = None
+        schedule_kwargs: Optional[Dict[str, Any]] = None
+
+        def __post_init__(self):
+            if self.schedule_kwargs is None and self.schedule_type is not None:
+                if self.schedule_type == "step":
+                    self.schedule_kwargs = {
+                    "step_size": 5,
+                    "gamma": 0.9
+                }
+                else:
+                    # 每个重启周期长度为 10，20, 40, ... 
+                    self.schedule_kwargs = {
+                    "T_0": 10,
+                    "T_mult": 2
+                }
 
     def __init__(
             self, 
@@ -101,8 +135,23 @@ class ModelTeacher:
                 weight_decay = self.cfg.weight_decay
             )
         
-        if self.cfg.use_schedule:
-            self.schedule = optim.lr_scheduler.StepLR(self.optimizer, self.cfg.lr_period, self.cfg.lr_decay)
+        if self.cfg.schedule_type == "step":
+            if self.cfg.schedule_kwargs is None:
+                self.schedule = optim.lr_scheduler.StepLR(self.optimizer, step_size = 5, gamma = 0.9)
+            else:
+                self.schedule = optim.lr_scheduler.StepLR(self.optimizer, **self.cfg.schedule_kwargs)
+        elif self.cfg.schedule_type == "restart_cos":
+            if self.cfg.schedule_kwargs is None:
+                self.schedule = optim.lr_scheduler.CosineAnnealingWarmRestarts(
+                    self.optimizer, T_0 = 10, T_mult = 2, eta_min = 0.0
+                )
+            else:
+                self.schedule = optim.lr_scheduler.CosineAnnealingWarmRestarts(self.optimizer, **self.cfg.schedule_kwargs)
+        elif self.cfg.schedule_type == "warm_cos":
+            if self.cfg.schedule_kwargs is None:
+                self.schedule = WarmUpCosineLR(self.optimizer, warmup_epoch = 10, T_max = 50, eta_min_rate = 0.01)
+            else:
+                self.schedule = WarmUpCosineLR(self.optimizer, **self.cfg.schedule_kwargs)
 
     def train_epoch(self, epoches: int):
         '''
@@ -133,13 +182,13 @@ class ModelTeacher:
                 
                 if i % 10 == 0 or (i + 1) == total_batches:
                     if self.success_fn:
-                        pbar.set_postfix(get_report_dict(i, accurate_loss, accurate_acc))
+                        pbar.set_postfix(get_report_dict(True, i, accurate_loss, accurate_acc))
                     else:
-                        pbar.set_postfix(get_report_dict(i, accurate_loss, accurate_acc))
+                        pbar.set_postfix(get_report_dict(True, i, accurate_loss, accurate_acc))
 
                 pbar.update(1)
 
-        if self.cfg.use_schedule:
+        if self.schedule is not None:
             self.schedule.step()
 
         return (accurate_acc / total_batches, accurate_loss / total_batches)
@@ -169,21 +218,23 @@ class ModelTeacher:
                 
                     if i % 10 == 0 or (i + 1) == total_batches:
                         if self.success_fn:
-                            pbar.set_postfix(get_report_dict(i, accurate_loss, accurate_acc))
+                            pbar.set_postfix(get_report_dict(False, i, accurate_loss, accurate_acc))
                         else:
-                            pbar.set_postfix(get_report_dict(i, accurate_loss, accurate_acc))
+                            pbar.set_postfix(get_report_dict(False, i, accurate_loss, accurate_acc))
 
                     pbar.update(1)
 
         return (accurate_acc / total_batches, accurate_loss / total_batches)
 
     def train(self, num_epoch):
+        
         train_acc = np.zeros(num_epoch)
         test_acc = np.zeros(num_epoch)
         train_loss = np.zeros(num_epoch)
         test_loss = np.zeros(num_epoch)
 
         self.best_res = -np.inf
+        effect_idx = 0
 
         try:
             for i in range(num_epoch):
@@ -198,24 +249,37 @@ class ModelTeacher:
                     print("Save best param")
                     self.best_res = cur_res
                     torch.save(self.net.state_dict(), self.save_dir.joinpath(f'best.pth').as_posix())
-        
+
+                effect_idx += 1
+
         except KeyboardInterrupt:
             pass
 
-        if self.success_fn is not None:
-            fig, axes = plt.subplot_mosaic('AB')
-        else:
-            fig, axes = plt.subplot_mosaic('B')
+        if effect_idx > 0:
+            train_acc = train_acc[:effect_idx]
+            test_acc = test_acc[:effect_idx]
+            train_loss = train_loss[:effect_idx]
+            test_loss = test_loss[:effect_idx]
 
-        axes["B"].plot(train_loss)
-        axes["B"].plot(test_loss)
-        axes["B"].legend(["Train Loss", "Test Loss"])
+            if self.success_fn is not None:
+                fig, axes = plt.subplot_mosaic('AB')
+            else:
+                fig, axes = plt.subplot_mosaic('B')
 
-        if self.success_fn is not None:
-            axes["A"].plot(train_acc)
-            axes["A"].plot(test_acc)
-            axes["A"].legend(["Train Acc", "Test Acc"])
+            axes["B"].plot(train_loss)
+            axes["B"].plot(test_loss)
+            axes["B"].legend(["Train Loss", "Test Loss"])
+            if self.success_fn is not None:
+                axes["B"].set_title(f"last test loss: {test_loss[-1]:.3e}")
+            else:
+                axes["B"].set_title(f"best test loss: {-self.best_res:.3e}")
+            
+            if self.success_fn is not None:
+                axes["A"].plot(train_acc)
+                axes["A"].plot(test_acc)
+                axes["A"].legend(["Train Acc", "Test Acc"])
+                axes["A"].set_title(f"best acc: {self.best_res:.3e}")
 
-        fig.savefig(self.save_dir.joinpath(f"train.png").as_posix())
-        with open(self.save_dir.joinpath(f"train_curve.npz"), "wb") as f:
-            np.savez(f, train_acc = train_acc, test_acc = test_acc, train_loss = train_loss, test_loss = test_loss)
+            fig.savefig(self.save_dir.joinpath(f"train.png").as_posix())
+            with open(self.save_dir.joinpath(f"train_curve.npz"), "wb") as f:
+                np.savez(f, train_acc = train_acc, test_acc = test_acc, train_loss = train_loss, test_loss = test_loss)

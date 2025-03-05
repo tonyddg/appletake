@@ -11,6 +11,9 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from torch.utils.tensorboard.writer import SummaryWriter
 import torch
 
+from matplotlib import pyplot as plt
+
+from ..utility import get_file_time_str
 from ..analysis_log import TickAnalysis
 from .get_critic import get_critic, is_model_critic_available
 import warnings
@@ -84,7 +87,7 @@ def eval_record(
     num_envs = env.num_envs
     # 按环境独立记录每帧画面
 
-    if not is_model_critic_available(model):
+    if RecordFlag.CRITIC in record_flag and not is_model_critic_available(model):
         warnings.warn("给定的模型不支持获取 Critic", UserWarning)
         record_flag = record_flag & (~RecordFlag.CRITIC)
 
@@ -145,42 +148,6 @@ def eval_record(
 
     return eval_res
 
-def eval_record_to_mp4_file(
-    model: "type_aliases.PolicyPredictor",
-    env: Union[VecEnv, VecEnvWrapper],
-
-    vedio_fold: Union[str, Path],
-    vedio_prefix: str = "",
-    fps: int = 25,
-
-    num_record_episodes: Optional[int] = None,
-    verbose: int = 0,
-    n_eval_episodes: int = 10,
-    deterministic: bool = True,
-    **kwargs
-):
-    '''
-    将过程记录为视频
-    '''
-    try:
-        from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
-    except ImportError as e:  # pragma: no cover
-        raise Exception("MoviePy is not installed") from e
-
-    if isinstance(vedio_fold, str):
-        vedio_fold = Path(vedio_fold)
-    if not vedio_fold.is_dir():
-        os.mkdir(vedio_fold)
-    vedio_name_pattern = str(vedio_fold.joinpath(vedio_prefix + "{}.mp4"))
-    
-    def mp4_callback(num_ep, vedio, *args):
-        clip = ImageSequenceClip(sequence = vedio, fps = fps)
-        clip.write_videofile(vedio_name_pattern.format(num_ep), logger = None)
-    
-    return eval_record(
-        model, env, mp4_callback, num_record_episodes, RecordFlag.VEDIO, verbose, n_eval_episodes, deterministic, **kwargs
-    )
-
 def eval_record_to_tensorbard(
     model: "type_aliases.PolicyPredictor",
     env: Union[VecEnv, VecEnvWrapper],
@@ -231,3 +198,92 @@ def eval_record_to_tensorbard(
     return eval_record(
         model, env, tb_callback, num_record_episodes, record_flag, verbose, n_eval_episodes, deterministic, **kwargs
     )
+
+def eval_record_to_file(
+    model: "type_aliases.PolicyPredictor",
+    env: Union[VecEnv, VecEnvWrapper],
+
+    save_root: Union[Path, str],
+    use_timestamp: bool = True,
+    is_save_return_plot: bool = True,
+
+    record_flag: RecordFlag = RecordFlag.NORMAL,
+    fps: int = 25,
+    return_gamma: float = 1,
+
+    num_record_episodes: Optional[int] = None,
+    verbose: int = 0,
+    n_eval_episodes: int = 10,
+    deterministic: bool = True,
+    **kwargs
+):
+    '''
+    将过程记录为文件
+    '''
+    # if RecordFlag.VEDIO in record_flag:
+    try:
+        from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
+    except ImportError as e:  # pragma: no cover
+        raise Exception("MoviePy is not installed") from e
+
+    save_root = Path(save_root)
+    if use_timestamp:
+        save_root = save_root.joinpath(get_file_time_str())
+    
+    if not save_root.exists():
+        os.mkdir(save_root)
+    vedio_name_pattern = save_root.joinpath("{}.gif").as_posix()
+    plot_name_pattern = save_root.joinpath("{}.png").as_posix()
+
+    reward_buf = []
+    critic_buf = []
+
+    def tb_callback(num_ep, vedio, reward_list, critic_list):
+        if vedio is not None:
+            # 拆分为 List
+            clip = ImageSequenceClip(sequence = [(img_slice * 255).astype(np.uint8) for img_slice in vedio], fps = fps)
+            clip.write_gif(vedio_name_pattern.format(num_ep), fps = fps, logger = None)
+
+        if reward_list is not None:
+            total_length = len(reward_list)
+            ep_return = 0
+            ep_return_list = np.zeros(total_length)
+
+            for t in range(total_length):
+                ep_return = reward_list[-1 - t] + ep_return * return_gamma
+                ep_return_list[total_length - t - 1] = ep_return
+
+            reward_buf.append(ep_return_list)
+
+            if is_save_return_plot:
+                fig, axe = plt.subplots()
+                axe.plot(ep_return_list)
+                axe.set_xlabel("Time Step")
+                axe.set_ylabel("Return")
+                axe.set_title(f"Eval {num_ep} return-time")
+                fig.savefig(plot_name_pattern.format(num_ep))
+
+                plt.close(fig)
+
+        if critic_list is not None:
+            critic_buf.append(critic_buf)
+
+    origin_res = eval_record(
+        model, env, tb_callback, num_record_episodes, record_flag, verbose, n_eval_episodes, deterministic, **kwargs
+    )
+
+    if len(reward_buf) > 0:
+        with open(save_root.joinpath("reward.npz"), 'wb') as f:
+            np.savez(
+                f, 
+                *reward_buf
+            )
+
+    if len(critic_buf) > 0:
+        with open(save_root.joinpath("critic.npz"), 'wb') as f:
+            np.savez(
+                f, 
+                *critic_buf
+            )
+    
+    return origin_res
