@@ -59,8 +59,8 @@ def get_depth_aug(noise_p: float, noise_scale: float = 1):
         ),
         A.CoarseDropout(
             num_holes_range = (1, int(3 * noise_scale)),
-            hole_height_range = (0.04 * noise_scale, 0.08 * noise_scale),
-            hole_width_range = (0.04 * noise_scale, 0.08 * noise_scale),
+            hole_height_range = (0.04 * noise_scale, 0.12 * noise_scale),
+            hole_width_range = (0.04 * noise_scale, 0.12 * noise_scale),
             fill = 1,
             p = noise_p
         ),

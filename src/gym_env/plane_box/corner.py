@@ -27,7 +27,11 @@ class CornerSubEnv(PlaneBoxSubenvBase):
         env_init_vis_pos_range: Optional[Tuple[np.ndarray, np.ndarray]] = None,
         env_vis_persp_deg_disturb: Optional[float] = None,
         env_movbox_height_offset_range: Optional[Tuple[float, float]] = None,
+        env_movebox_center_err: Optional[Tuple[np.ndarray, np.ndarray]] = None,
  
+        env_is_complexity_progression: bool = False,
+        env_minium_ratio: float = 1,
+
         env_tolerance_offset: float = 0,
         env_test_in: float = 0.05,
         env_max_step: int = 20,
@@ -37,12 +41,18 @@ class CornerSubEnv(PlaneBoxSubenvBase):
     ) -> None:
 
         self.plane = Shape("Plane" + name_suffix)
+        # 对于环境问题的补救
+        self.plane.set_dynamic(False)
+        self.plane.set_respondable(False)
 
         super().__init__(
             name_suffix = name_suffix, 
             obs_trans = obs_trans, obs_source = obs_source, env_object = self.plane, 
             env_action_noise = env_action_noise, env_init_box_pos_range = env_init_box_pos_range, env_init_vis_pos_range = env_init_vis_pos_range, env_vis_persp_deg_disturb = env_vis_persp_deg_disturb,
             env_movbox_height_offset_range = env_movbox_height_offset_range,
+            env_movebox_center_err = env_movebox_center_err,
+            env_is_complexity_progression = env_is_complexity_progression, 
+            env_minium_ratio = env_minium_ratio,
             env_tolerance_offset = env_tolerance_offset, env_test_in = env_test_in, env_max_step = env_max_step,
             **subenv_kwargs
         )
@@ -114,8 +124,15 @@ class CornerEnv(PlaneBoxEnv):
         env_vis_persp_deg_disturb: Optional[float] = None,
         env_movbox_height_offset_range: Optional[Tuple[float, float]] = None,
  
+        env_movebox_center_err: Optional[Tuple[Union[Sequence[float], np.ndarray], Union[Sequence[float], np.ndarray]]] = None,
+
+        env_is_complexity_progression: bool = False,
+        env_minium_ratio: float = 1,
+
         # 单位 mm, deg
         act_unit: Sequence[float] = (5, 5, 5, 1, 1, 1),
+
+        train_total_timestep: Optional[int] = None,
 
         corner_plane_height_offset_range: Optional[Tuple[float, float]] = None,
     ) -> None:
@@ -127,6 +144,9 @@ class CornerEnv(PlaneBoxEnv):
             env_reward_fn = env_reward_fn, env_tolerance_offset = env_tolerance_offset, env_test_in = env_test_in, env_max_step = env_max_step, 
             env_action_noise = env_action_noise, env_init_box_pos_range = env_init_box_pos_range, env_init_vis_pos_range = env_init_vis_pos_range, 
             env_vis_persp_deg_disturb = env_vis_persp_deg_disturb, env_movbox_height_offset_range = env_movbox_height_offset_range,
-            act_unit = act_unit,
-            corner_plane_height_offset_range = corner_plane_height_offset_range
+            env_movebox_center_err = env_movebox_center_err,
+            env_is_complexity_progression = env_is_complexity_progression, 
+            env_minium_ratio = env_minium_ratio,
+            act_unit = act_unit, train_total_timestep = train_total_timestep,
+            corner_plane_height_offset_range = corner_plane_height_offset_range,
         )

@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
 import numpy as np
 from albumentations.core.composition import TransformType
 
-from ...gym_env.utility import sample_float, set_pose6_by_self
+from ...gym_env.utility import set_pose6_by_self
 
 from .plane_box import EnvObjectsBase, PlaneBoxEnv, RewardFnType, PlaneBoxSubenvBase
 
@@ -39,7 +39,11 @@ class ThreeSubEnv(PlaneBoxSubenvBase):
         env_init_vis_pos_range: Optional[Tuple[np.ndarray, np.ndarray]] = None,
         env_vis_persp_deg_disturb: Optional[float] = None,
         env_movbox_height_offset_range: Optional[Tuple[float, float]] = None,
+        env_movebox_center_err: Optional[Tuple[np.ndarray, np.ndarray]] = None,
  
+        env_is_complexity_progression: bool = False,
+        env_minium_ratio: float = 1,
+
         env_tolerance_offset: float = 0,
         env_test_in: float = 0.05,
         env_max_step: int = 20,
@@ -50,6 +54,10 @@ class ThreeSubEnv(PlaneBoxSubenvBase):
     ) -> None:
         
         self.plane = Shape("Plane" + name_suffix)
+        # 对于环境问题的补救
+        self.plane.set_dynamic(False)
+        self.plane.set_respondable(False)
+
         self.corner = Dummy("CornerPosition" + name_suffix)
         self.fixbox_list: List[Shape] = [
             Shape.create(PrimitiveShape.CUBOID, [0.001, 0.001, 0.001])
@@ -60,6 +68,9 @@ class ThreeSubEnv(PlaneBoxSubenvBase):
             obs_trans = obs_trans, obs_source = obs_source, env_object = PlaneAndThree(self.plane, self.fixbox_list), 
             env_action_noise = env_action_noise, env_init_box_pos_range = env_init_box_pos_range, env_init_vis_pos_range = env_init_vis_pos_range, env_vis_persp_deg_disturb = env_vis_persp_deg_disturb,
             env_movbox_height_offset_range = env_movbox_height_offset_range,
+            env_movebox_center_err = env_movebox_center_err,
+            env_is_complexity_progression = env_is_complexity_progression, 
+            env_minium_ratio = env_minium_ratio,
             env_tolerance_offset = env_tolerance_offset, env_test_in = env_test_in, env_max_step = env_max_step,
             **subenv_kwargs
         )
@@ -113,7 +124,7 @@ class ThreeSubEnv(PlaneBoxSubenvBase):
             return
         
         fixbox_size = np.array([[
-            sample_float(self.three_fixbox_size_range[0][i], self.three_fixbox_size_range[1][i])
+            self.sample_float(self.three_fixbox_size_range[0][i], self.three_fixbox_size_range[1][i])
             for i in range(3)
         ] for _ in range(3)], np.float32)
 
@@ -165,9 +176,16 @@ class ThreeEnv(PlaneBoxEnv):
         
         env_vis_persp_deg_disturb: Optional[float] = None,
         env_movbox_height_offset_range: Optional[Tuple[float, float]] = None,
- 
+        
+        env_movebox_center_err: Optional[Tuple[Union[Sequence[float], np.ndarray], Union[Sequence[float], np.ndarray]]] = None,
+
+        env_is_complexity_progression: bool = False,
+        env_minium_ratio: float = 1,
+
         # 单位 mm, deg
         act_unit: Sequence[float] = (5, 5, 5, 1, 1, 1),
+
+        train_total_timestep: Optional[int] = None,
 
         three_fixbox_size_range: Optional[Tuple[Union[Sequence[float], np.ndarray], Union[Sequence[float], np.ndarray]]] = None,
     ) -> None:
@@ -187,6 +205,9 @@ class ThreeEnv(PlaneBoxEnv):
             env_reward_fn = env_reward_fn, env_tolerance_offset = env_tolerance_offset, env_test_in = env_test_in, env_max_step = env_max_step, 
             env_action_noise = env_action_noise, env_init_box_pos_range = env_init_box_pos_range, env_init_vis_pos_range = env_init_vis_pos_range, 
             env_vis_persp_deg_disturb = env_vis_persp_deg_disturb, env_movbox_height_offset_range = env_movbox_height_offset_range,
-            act_unit = act_unit,
-            three_fixbox_size_range = _three_fixbox_size_range
+            env_movebox_center_err = env_movebox_center_err,
+            env_is_complexity_progression = env_is_complexity_progression, 
+            env_minium_ratio = env_minium_ratio,
+            act_unit = act_unit, train_total_timestep = train_total_timestep,
+            three_fixbox_size_range = _three_fixbox_size_range,
         )

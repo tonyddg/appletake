@@ -14,10 +14,11 @@ import numpy as np
 from matplotlib import pyplot as plt
 from abc import ABCMeta, abstractmethod
 from pprint import pp as pprint
+from warnings import warn
 
 from ...net.pr_task_dataset import PrTaskVecEnvForDatasetInterface
 
-from ..utility import get_quat_diff_rad, get_rel_pose, mrad_to_mmdeg, sample_float, set_pose6_by_self, sample_vec, DIRECT2INDEX
+from ..utility import get_quat_diff_rad, get_rel_pose, mrad_to_mmdeg, sample_float, set_pose6_by_self, sample_vec, DIRECT2INDEX, tuple_seq_asnumpy, eular_to_quat, quat_to_rotvec, progressive_sample_float, progressive_sample_vec
 from ...utility import get_file_time_str
 from ...conio.key_listen import KEY_CB_DICT_TYPE
 
@@ -49,6 +50,8 @@ class TestWall(EnvObjectsBase):
     test_c: Shape
     test_d: Shape
 
+    cur_offset: float = 0
+
     def offset_tolerance(self, offset: float):
         '''
         认为 B, D 为可动的边界, 且自身坐标系的 +z 方向为增大容差的方向  
@@ -60,12 +63,17 @@ class TestWall(EnvObjectsBase):
         '''
         self.test_b.set_position(np.array([0, 0, offset]), self.test_b)
         self.test_d.set_position(np.array([0, 0, offset]), self.test_d)
+
+        self.cur_offset += offset
     
     def check_collision(self, obj: Object):
         return self.test_a.check_collision(obj) or\
                 self.test_b.check_collision(obj) or\
                 self.test_c.check_collision(obj) or\
                 self.test_d.check_collision(obj)
+
+    def to_origin(self):
+        self.offset_tolerance(-self.cur_offset)
 
 class PlaneBoxSubenvBase(metaclass = ABCMeta):
 
@@ -89,7 +97,14 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         env_vis_persp_deg_disturb: Optional[float] = None,
         # 纸箱高度变化 (基于 m 单位)
         env_movbox_height_offset_range: Optional[Tuple[float, float]] = None,
+
+        # 纸箱中心位置估计误差 (与相机误差同源, 可能需要 FrameStack 解决?)
+        env_movebox_center_err: Optional[Tuple[np.ndarray, np.ndarray]] = None,
  
+        # 是否使用环境复杂性递增
+        env_is_complexity_progression: bool = False,
+        env_minium_ratio: float = 1,
+
         env_tolerance_offset: float = 0,
         # Checker 长度为 50mm, 因此仅当箱子与垛盘间隙为 51~100 mm (相对原始位置偏移 1~50 mm) 时可通过检查 
         env_test_in: float = 0.05,
@@ -130,7 +145,9 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
             Shape("TestC" + name_suffix),
             Shape("TestD" + name_suffix),
         )
-        self.test_wall.offset_tolerance(env_tolerance_offset)
+
+        # 不能在创建环境时修改环境
+        self.env_tolerance_offset = env_tolerance_offset
         self.test_check = Shape("TestCheck" + name_suffix)
 
         ###
@@ -143,6 +160,7 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
 
         # 核心锚点 (移动物体与检测区域) -> None
         self.origin_pose_core_anchor_relnone = self.anchor_core_object.get_pose(None)
+        self.origin_pose_env_anchor_relnone = self.anchor_env_object.get_pose(None)
 
         # 移动锚点 (盒子与相机) -> 核心锚点
         self.origin_pose_move_anchor_relcore = self.anchor_move_object.get_pose(self.anchor_core_object)
@@ -159,15 +177,27 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         self.env_init_box_pos_range = env_init_box_pos_range
         self.env_init_vis_pos_range = env_init_vis_pos_range
 
-        # 箱子的最佳位置, 用于奖励函数与神经网络构建等
-        self.best_pose_move_anchor_relcore = np.copy(self.origin_pose_move_anchor_relcore)
+        # # 箱子的最佳位置, 用于奖励函数与神经网络构建等
+        # self.best_pose_move_anchor_relcore = np.copy(self.origin_pose_move_anchor_relcore)
 
-        # 根据容差自动计算
-        xy_best_position_offset = (env_tolerance_offset + 0.01) / 2
-        env_move_box_best_position_offset: np.ndarray = np.array([-xy_best_position_offset, -xy_best_position_offset, 0.025])
+        # # 根据容差自动计算 (要求初始位姿的坐标系与锚点坐标系平行)
+        # xy_best_position_offset = (env_tolerance_offset + 0.01) / 2
+        # env_move_box_best_position_offset: np.ndarray = np.array([-xy_best_position_offset, -xy_best_position_offset, 0.025])
 
-        self.best_pose_move_anchor_relcore[:3] += env_move_box_best_position_offset
-        self.env_move_box_best_position_offset = env_move_box_best_position_offset
+        # self.best_pose_move_anchor_relcore[:3] += env_move_box_best_position_offset
+
+        # 使用锚点代替最佳位置的具体坐标
+        self.anchor_best_movebox_pose = Dummy.create()
+        self.anchor_best_movebox_pose.set_parent(self.anchor_core_object)
+        self.anchor_best_movebox_pose.set_pose(self.origin_pose_move_anchor_relcore, self.anchor_core_object)
+        self.anchor_best_movebox_pose.set_name("BestMoveboxPose" + name_suffix)
+        
+        # 根据容差修正最佳位置 (注意纸箱高度导致的最佳位置变化)
+        # xy_best_position_offset = (env_tolerance_offset + 0.01) / 2
+        # env_move_box_best_position_offset: np.ndarray = np.array([0, 0, 0.025])
+        self.anchor_best_movebox_pose.set_position(np.array([0, 0, 0.025]), self.anchor_best_movebox_pose)
+
+        self.origin_pose_best_anchor_relcore = self.anchor_best_movebox_pose.get_pose(self.anchor_core_object)
 
         ###
 
@@ -184,6 +214,18 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         self.env_movbox_height_offset_range = env_movbox_height_offset_range
         self.movebox_origin_height = self.move_box.get_bounding_box()[5] - self.move_box.get_bounding_box()[4]
         self._last_scale_movebox = None
+
+        ###
+
+        self.env_movebox_center_err = env_movebox_center_err
+        # self._init_best_pose_move_anchor_relcore = np.copy(self.best_pose_move_anchor_relcore)
+
+        ###
+
+        self.env_is_complexity_progression = env_is_complexity_progression
+        self.env_minium_ratio = env_minium_ratio
+        # 使用 0, 1 的浮点数表示训练进度 (初始状态下认为训练进度为 1)
+        self.env_train_progress = 1
 
         ###
 
@@ -248,6 +290,15 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
 
     ###
 
+    def _close_env(self):
+        '''
+        close 时调用
+        还原原始状态
+        删除初始化环境时创建的锚点
+        '''
+        self._to_origin_state()
+        self.anchor_best_movebox_pose.remove()
+
     def _to_origin_state(self):
         '''
         返回原始状态
@@ -255,7 +306,9 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
 
         # 核心锚点 (移动物体与检测区域) -> None
         self.anchor_core_object.set_pose(self.origin_pose_core_anchor_relnone, None)
-        
+        # 环境锚点
+        self.anchor_env_object.set_pose(self.origin_pose_env_anchor_relnone, None)
+
         # 移动锚点 (盒子与相机) -> 核心锚点
         self.anchor_move_object.set_pose(self.origin_pose_move_anchor_relcore, self.anchor_core_object)
         # 移动盒子
@@ -266,9 +319,16 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         # 检测锚点 (检测区域) -> 核心锚点
         self.anchor_test_object.set_pose(self.origin_pose_test_anchor_relcore, self.anchor_core_object)
 
+        # 修正最佳位置
+        self.anchor_best_movebox_pose.set_pose(self.origin_pose_best_anchor_relcore, self.anchor_core_object)
+        # self.best_pose_move_anchor_relcore = self._init_best_pose_move_anchor_relcore
+
         if self._last_scale_movebox is not None:
             self.move_box.scale_object(1, 1, 1 / self._last_scale_movebox)
             self._last_scale_movebox = None
+
+        # 修正探测区偏移
+        self.test_wall.to_origin()
 
     def _set_vis_fov_offset(self, offset: float):
         operate_vis = self.color_camera if self.obs_source == "color" else self.depth_camera
@@ -282,6 +342,11 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         # 保持盒子底面与检测区的接触
         set_pose6_by_self(self.vis_anchor, np.array([0, 0, offset / 2]) * 1e3)
         set_pose6_by_self(self.anchor_move_object, np.array([0, 0, offset / 2]) * 1e3)
+        # 修正最佳位置
+        set_pose6_by_self(self.anchor_best_movebox_pose, np.array([0, 0, offset / 2]) * 1e3)
+
+    def _set_movebox_center_offset(self, offset: np.ndarray):
+        set_pose6_by_self(self.move_box, offset)
 
     def _set_init_move_anchor_pos(
             self,
@@ -290,7 +355,7 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         设置箱子初始位置 (基于最佳位置随机初始化)
         '''
         if self.env_init_box_pos_range is not None:
-            init_pose = sample_vec(self.env_init_box_pos_range[0], self.env_init_box_pos_range[1])
+            init_pose = self.sample_vec(self.env_init_box_pos_range[0], self.env_init_box_pos_range[1])
             set_pose6_by_self(self.anchor_move_object, init_pose)
 
     def _set_init_vis_pos(
@@ -300,7 +365,7 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         设置相机初始位置
         '''
         if self.env_init_vis_pos_range is not None:
-            init_pose = sample_vec(self.env_init_vis_pos_range[0], self.env_init_vis_pos_range[1])
+            init_pose = self.sample_vec(self.env_init_vis_pos_range[0], self.env_init_vis_pos_range[1])
             set_pose6_by_self(self.vis_anchor, init_pose)
 
     def _set_init_vis_fov(
@@ -320,8 +385,13 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         '''
         # 从均匀分布随机采样 (可改为正态分布 ?)
         if self.env_movbox_height_offset_range is not None:
-            init_offset = sample_float(self.env_movbox_height_offset_range[0], self.env_movbox_height_offset_range[1])
+            init_offset = self.sample_float(self.env_movbox_height_offset_range[0], self.env_movbox_height_offset_range[1])
             self._set_movebox_height_offset(init_offset)
+
+    def _set_init_movebox_center_offset(self):
+        if self.env_movebox_center_err is not None:
+            init_offset = self.sample_vec(self.env_movebox_center_err[0], self.env_movebox_center_err[1])
+            self._set_movebox_center_offset(init_offset)
 
     def _set_max_init(self, direct: Literal[0, 1] = 0):
         '''
@@ -340,7 +410,13 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
                 self._set_vis_fov_offset(self.env_vis_fov_disturb)
         if self.env_movbox_height_offset_range is not None:
             self._set_movebox_height_offset(self.env_movbox_height_offset_range[direct])
+        if self.env_movebox_center_err is not None:
+            self._set_movebox_center_offset(self.env_movebox_center_err[direct])
 
+        self.test_wall.offset_tolerance(self.env_tolerance_offset)
+        # 根据偏移调整最佳位置
+        set_pose6_by_self(self.anchor_best_movebox_pose, np.array([(self.env_tolerance_offset + 0.01), (self.env_tolerance_offset + 0.01), 0]) * 1e3 / 2 * -1)
+        
     def reset(self):
         '''
         重新初始化
@@ -355,6 +431,14 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         self._set_init_vis_fov()
         self._set_init_move_box_height()
         self._set_init_move_anchor_pos()
+        self._set_init_movebox_center_offset()
+
+        # 在 to_origin 初始化环境
+        # 在 reset 应用更改
+        # 重置容许区域偏置
+        self.test_wall.offset_tolerance(self.env_tolerance_offset)
+        # 根据偏移调整最佳位置
+        set_pose6_by_self(self.anchor_best_movebox_pose, np.array([(self.env_tolerance_offset + 0.01), (self.env_tolerance_offset + 0.01), 0]) * 1e3 / 2 * -1)
 
     ###
 
@@ -388,7 +472,28 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         if is_truncated or is_alignments or is_collisions:
             self.reset()
         return is_truncated, is_alignments, is_collisions
-    
+
+    ###
+
+    def set_train_progress(self, progress: float):
+        '''
+        设置环境训练进展, 每个 episode 结束后更新, 为 cur_timestep / total_timestep
+        '''
+        self.env_train_progress = progress
+        # print(f"set progress to {self.env_train_progress}")
+
+    def sample_vec(self, min_vec: np.ndarray, max_vec: np.ndarray):
+        if self.env_is_complexity_progression:
+            return progressive_sample_vec(min_vec, max_vec, self.env_train_progress, self.env_minium_ratio)
+        else:
+            return progressive_sample_vec(min_vec, max_vec, 1, 1)
+
+    def sample_float(self, min_side: float, max_side: float):
+        if self.env_is_complexity_progression:
+            return progressive_sample_float(min_side, max_side, self.env_train_progress, self.env_minium_ratio)
+        else:
+            return progressive_sample_float(min_side, max_side, 1, 1)
+
 #     raise NotImplementedError
 
 # reward = reward_fn(subenv, is_alignments, is_collisions)
@@ -416,6 +521,12 @@ class PlaneBoxSubenvInitProtocol(Protocol):
         env_init_vis_pos_range: Optional[Tuple[np.ndarray, np.ndarray]] = None,
         env_vis_persp_deg_disturb: Optional[float] = None,
         env_movbox_height_offset_range: Optional[Tuple[float, float]] = None,
+        # 纸箱中心位置估计误差 (与相机误差同源, 可能需要 FrameStack 解决?)
+        env_movebox_center_err: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+ 
+        # 是否使用环境复杂性递增
+        env_is_complexity_progression: bool = False,
+        env_minium_ratio: float = 1,
 
         env_tolerance_offset: float = 0,
         env_test_in: float = 0.05,
@@ -447,17 +558,20 @@ class RewardSpare(RewardFnABC):
 class RewardLinearDistance(RewardFnABC):
     def __init__(
             self, 
+            # 用于基本范围
             max_pos_dis_mm: float = 40,
-            max_rot_dis_deg: float = 10,
+            max_rot_dis_deg: float = 8,
             time_panelty: float = -0.1, 
             colision_panelty: float = -1, 
             success_reward: float = 1
         ) -> None:
         '''
         基于相对 best pose 给出奖励
+
+        使用轴角对表示角度误差
         '''
         self.max_pos_dis = max_pos_dis_mm * 1e-3
-        self.max_rot_dis = float(np.deg2rad(max_rot_dis_deg))
+        self.max_rot_dis = float(max_rot_dis_deg)
         self.time_panelty = time_panelty
         self.colision_panelty = colision_panelty
         self.success_reward = success_reward
@@ -468,13 +582,15 @@ class RewardLinearDistance(RewardFnABC):
         elif is_alignment:
             return self.success_reward
         else:
-            cur_pose = subenv.anchor_move_object.get_pose(subenv.anchor_core_object)
+            # cur_pose = subenv.anchor_move_object.get_pose(subenv.anchor_core_object)
+            pose_diff = subenv.move_box.get_pose(subenv.anchor_best_movebox_pose)
 
-            diff_xy = np.linalg.norm(cur_pose[:2] - subenv.best_pose_move_anchor_relcore[:2], 2)
-            diff_rad = get_quat_diff_rad(cur_pose[3:], subenv.best_pose_move_anchor_relcore[3:])
+            diff_xy = np.linalg.norm(pose_diff[:2], 2)
+            # diff_rad = get_quat_diff_rad(cur_pose[3:], subenv.best_pose_move_anchor_relcore[3:])
+            diff_deg, _ = quat_to_rotvec(pose_diff[3:])
 
             reach_xy = max(float(self.max_pos_dis - diff_xy), 0.0) / self.max_pos_dis
-            reach_ang = max(self.max_rot_dis - diff_rad, 0) / self.max_rot_dis
+            reach_ang = max(self.max_rot_dis - diff_deg, 0) / self.max_rot_dis
             reach_reward = (reach_xy + reach_ang) / 2
 
             return (1 - reach_reward) * self.time_panelty
@@ -528,6 +644,10 @@ step: {self.env._subenv_step}, reward: {self.reward_fn(self.env, is_alignments, 
         self.env.anchor_move_object.set_pose(self.env.origin_pose_move_anchor_relcore, self.env.anchor_core_object)
         set_pose6_by_self(self.env.anchor_move_object, mmdeg_pose)
 
+    def to_best_pose(self):
+        pose_diff = self.env.anchor_best_movebox_pose.get_pose(self.env.move_box)
+        self.env.anchor_move_object.set_pose(pose_diff, self.env.anchor_move_object)
+
     def get_base_key_dict(self) -> KEY_CB_DICT_TYPE:
         return {
             'a': lambda: self.unit_step('y', 'pos', -1),
@@ -556,12 +676,7 @@ step: {self.env._subenv_step}, reward: {self.reward_fn(self.env, is_alignments, 
             # 正向最远位置
             '7': lambda: self.env._set_max_init(1),
             # 最佳位置
-            '8': lambda: self.try_init_pose(mrad_to_mmdeg(np.array([
-                    self.env.best_pose_move_anchor_relcore[0], 
-                    self.env.best_pose_move_anchor_relcore[1], 
-                    self.env.best_pose_move_anchor_relcore[2], 
-                    0, 0, 0
-                ], dtype = np.float32))),
+            '8': lambda: self.to_best_pose(),
 
             '`': lambda: self.env.reset()
         }
@@ -591,21 +706,27 @@ class PlaneBoxEnv(VecEnv, PrTaskVecEnvForDatasetInterface):
             env_init_vis_pos_range: Optional[Tuple[Union[Sequence[float], np.ndarray], Union[Sequence[float], np.ndarray]]] = None,
             env_vis_persp_deg_disturb: Optional[float] = None,
             env_movbox_height_offset_range: Optional[Tuple[float, float]] = None,
+            # 纸箱中心位置估计误差 (与相机误差同源, 可能需要 FrameStack 解决?)
+            env_movebox_center_err: Optional[Tuple[Union[Sequence[float], np.ndarray], Union[Sequence[float], np.ndarray]]] = None,
+     
+            # 是否使用环境复杂性递增
+            env_is_complexity_progression: bool = False,
+            env_minium_ratio: float = 1,
 
             # 单位 mm, deg
             act_unit: Sequence[float] = (5, 5, 5, 1, 1, 1),
+
+            train_total_timestep: Optional[int] = None,
 
             **subenv_env_object_kwargs: Any,
         ):
 
         self.act_unit = np.asarray(act_unit)
-        if env_init_box_pos_range is not None:
-            env_init_box_pos_range_ = (
-                np.asarray(env_init_box_pos_range[0], np.float32), 
-                np.asarray(env_init_box_pos_range[1], np.float32)
-            )
-        else:
-            env_init_box_pos_range_ = None
+
+        env_init_box_pos_range_ = tuple_seq_asnumpy(env_init_box_pos_range)
+        env_init_vis_pos_range_ = tuple_seq_asnumpy(env_init_vis_pos_range)
+        env_movebox_center_err_ = tuple_seq_asnumpy(env_movebox_center_err)
+
         if env_init_vis_pos_range is not None:
             env_init_vis_pos_range_ = (
                 np.asarray(env_init_vis_pos_range[0], np.float32), 
@@ -624,6 +745,10 @@ class PlaneBoxEnv(VecEnv, PrTaskVecEnvForDatasetInterface):
                 env_init_vis_pos_range = env_init_vis_pos_range_, 
                 env_vis_persp_deg_disturb = env_vis_persp_deg_disturb,
                 env_movbox_height_offset_range = env_movbox_height_offset_range,
+                env_movebox_center_err = env_movebox_center_err_,
+
+                env_is_complexity_progression = env_is_complexity_progression,
+                env_minium_ratio = env_minium_ratio,
 
                 env_tolerance_offset = env_tolerance_offset,
                 env_test_in = env_test_in, env_max_step = env_max_step,
@@ -638,6 +763,9 @@ class PlaneBoxEnv(VecEnv, PrTaskVecEnvForDatasetInterface):
             self.subenv_list[0].get_space(),
             gym.spaces.Box(-self.act_unit, self.act_unit, [6,], dtype = np.float32)
         )
+
+        self.train_total_timestep = train_total_timestep
+        self.cur_timestep = 0
 
         self.env_reward_fn = env_reward_fn
         self.env_pr = env_pr
@@ -721,6 +849,19 @@ class PlaneBoxEnv(VecEnv, PrTaskVecEnvForDatasetInterface):
                 infos[i]["TimeLimit.truncated"] = truncateds[i] and not terminateds[i]
                 infos[i]["terminal_observation"] = subenv.get_obs()
 
+                # 记录成功率
+                infos[i]["is_success"] = is_alignments[i] and not is_collisions[i]
+
+                if self.train_total_timestep != None:
+                    subenv.set_train_progress(
+                        min(self.cur_timestep / self.train_total_timestep, 1)
+                    )
+                else:
+                    subenv.set_train_progress(
+                        1
+                    )
+                    if subenv.env_is_complexity_progression:
+                        warn(f"使用 complexity_progression 但没有给出总步长")
                 subenv.reset()
 
         # 执行完成新场景初始化
@@ -738,6 +879,9 @@ class PlaneBoxEnv(VecEnv, PrTaskVecEnvForDatasetInterface):
         self.render_img_list = None
 
     def step_wait(self) -> VecEnvStepReturn:
+
+        self.cur_timestep += self.num_envs
+
         truncateds = self._step_take_action()
         is_alignments, is_collisions = self._step_env_check()
         return self._step_post_info(
@@ -750,7 +894,9 @@ class PlaneBoxEnv(VecEnv, PrTaskVecEnvForDatasetInterface):
     def close(self) -> None:
         # 在环境关闭时还原到原始状态
         for subenv in self.subenv_list:
-            subenv._to_origin_state()
+            # 还原原始状态
+            # 删除初始化环境时创建的锚点
+            subenv._close_env()
 
     ### 未实现的虚函数
 
@@ -787,7 +933,7 @@ class PlaneBoxEnv(VecEnv, PrTaskVecEnvForDatasetInterface):
             # 转为 float32 用于训练
             np.asarray(
                 mrad_to_mmdeg(
-                    get_rel_pose(subenv.anchor_move_object.get_pose(subenv.anchor_core_object), subenv.best_pose_move_anchor_relcore)
+                    get_rel_pose(subenv.move_box.get_pose(subenv.anchor_core_object), subenv.anchor_best_movebox_pose.get_pose(subenv.anchor_core_object))
                 ), np.float32)
             for subenv in self.subenv_list
         ]
@@ -813,10 +959,14 @@ class PlaneBoxEnv(VecEnv, PrTaskVecEnvForDatasetInterface):
 class PlaneBoxEnvTest:
     def __init__(
             self,
-            plane_box_env: VecEnv,
+            # plane_box_env: VecEnv,
+            env_maker: Callable[[], VecEnv],
             watch_idx: int,
             model: Optional["type_aliases.PolicyPredictor"]
         ) -> None:
+
+        plane_box_env = env_maker()
+        self.env_maker = env_maker
 
         assert isinstance(plane_box_env.unwrapped, PlaneBoxEnv), "不支持其他类型的环境"
         self.plane_box_env: PlaneBoxEnv = plane_box_env.unwrapped
@@ -828,6 +978,15 @@ class PlaneBoxEnvTest:
 
         self.fig, self.axe = plt.subplots()
 
+        self.last_wrapped_obs = self.wrapped_env.reset()
+
+    def reinit_test(self):
+        self.wrapped_env.close()
+
+        plane_box_env = self.env_maker()
+        assert isinstance(plane_box_env.unwrapped, PlaneBoxEnv), "不支持其他类型的环境"
+        self.plane_box_env = plane_box_env.unwrapped
+        self.wrapped_env = plane_box_env
         self.last_wrapped_obs = self.wrapped_env.reset()
 
     def step(self, action: np.ndarray, is_print: bool = True):
@@ -894,7 +1053,9 @@ class PlaneBoxEnvTest:
 
     def to_best_init(self):
         env = self.plane_box_env.subenv_list[self.watch_idx]
-        env.anchor_move_object.set_pose(self.plane_box_env.subenv_list[self.watch_idx].best_pose_move_anchor_relcore, env.anchor_core_object)
+
+        pose_diff = env.anchor_best_movebox_pose.get_pose(env.move_box)
+        env.anchor_move_object.set_pose(pose_diff, env.anchor_move_object)
         self.step(np.zeros((self.wrapped_env.num_envs, 6)))
 
     def try_max_state(self, direction: Literal[0, 1]):
@@ -929,8 +1090,10 @@ class PlaneBoxEnvTest:
             '5': lambda: self.try_max_state(1),
 
             # 初始化测试
-            '6': lambda: self.wrapped_env.close(),
-            '7': lambda: self.plane_box_env.close(),
+            '6': lambda: self.reinit_test(),
+
+            '8': lambda: self.plane_box_env.subenv_list[self.watch_idx].set_train_progress(0.2),
+            '9': lambda: self.plane_box_env.subenv_list[self.watch_idx].set_train_progress(0.9),
 
             '=': lambda: self.take_model_action(),
             '`': lambda: self.reset()
