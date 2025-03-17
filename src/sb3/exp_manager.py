@@ -51,6 +51,8 @@ class TrialArgs:
     tb_fps: int = 20
     tb_record_flag: RecordFlag = RecordFlag["NORMAL"]
 
+    tb_record_last_only: bool = False
+
 @dataclass
 class ObjectiveArgs:
     model: LegalModelType
@@ -194,10 +196,11 @@ def parse_exp_config(cfg: DictConfig, replace_arg_dict: Optional[Dict[str, Any]]
 
     return ObjectiveArgs(model, train_env, eval_env, trial_args) # type: ignore
 
-def load_exp_config(*cfg_file_list: Union[str, Path], merge_dict: Dict[str, Any] = {}):
+def load_exp_config(*cfg_file_list: Union[str, Path], is_resolve: bool, merge_dict: Dict[str, Any] = {}):
     '''
     * `merge_dict` 优先级最高
     * 越先传入的配置优先级越低
+    * 在加载结束后进行 resolve
     '''
     merge_cfg = OmegaConf.create({})
     for cfg_file in cfg_file_list:
@@ -207,6 +210,8 @@ def load_exp_config(*cfg_file_list: Union[str, Path], merge_dict: Dict[str, Any]
 
     merge_cfg = OmegaConf.merge(merge_cfg, OmegaConf.create(merge_dict))
     assert isinstance(merge_cfg, DictConfig), "配置文件格式不正确"
+    if is_resolve:
+        OmegaConf.resolve(merge_cfg)
     return merge_cfg
 
 def hanle_learn_LiveError():
@@ -297,7 +302,7 @@ class ExpManager:
         if isinstance(exp_conf, DictConfig):
             self.exp_conf = exp_conf
         else:
-            self.exp_conf = load_exp_config(exp_conf)
+            self.exp_conf = load_exp_config(exp_conf, is_resolve = False)
 
         self.exp_name = str(self.exp_conf.trial.get("meta_exp_name", "trial"))
         if exp_name_suffix is not None:
@@ -308,7 +313,7 @@ class ExpManager:
 
         self.exp_root = Path(str(self.exp_conf.trial.get("meta_exp_root", "runs")))
         if not self.exp_root.exists():
-            os.mkdir(self.exp_root)
+            os.makedirs(self.exp_root)
 
         # 创建 optuna 训练记录
         self.exp_db_path = f"sqlite:///{self.exp_root.as_posix()}/optuna.db"
@@ -369,7 +374,7 @@ class ExpManager:
         # 创建目录并保存配置
         object_root = self.exp_root.joinpath(get_file_time_str())
         cur_exp_conf.trial.meta_object_path = object_root.as_posix()
-        os.mkdir(object_root)
+        os.makedirs(object_root)
         with open(object_root.joinpath("config.yaml"), 'w') as f:
             OmegaConf.resolve(cur_exp_conf)
             # 最终配置不保留 sample
@@ -390,6 +395,7 @@ class ExpManager:
 
             tb_record_flag = objective_data.trial_args.tb_record_flag,
             fps = objective_data.trial_args.tb_fps,
+            tb_record_last_only = objective_data.trial_args.tb_record_last_only,
 
             num_record_episodes = objective_data.trial_args.tb_record_episodes,
             deterministic = objective_data.trial_args.eval_deterministic,
@@ -452,12 +458,12 @@ def train_model(
     if add_time_stamp:
         exp_root = Path(exp_root.as_posix() + '_' + get_file_time_str())
     if not exp_root.exists():
-        os.mkdir(exp_root)
+        os.makedirs(exp_root)
 
     if isinstance(exp_conf, DictConfig):
         exp_conf = exp_conf
     else:
-        exp_conf = load_exp_config(exp_conf)
+        exp_conf = load_exp_config(exp_conf, is_resolve = True)
 
     if verbose is not None:
         exp_conf.merge_with({"model": { "kwargs": { "verbose": verbose}}})
@@ -484,6 +490,7 @@ def train_model(
 
         tb_record_flag = objective_data.trial_args.tb_record_flag,
         fps = objective_data.trial_args.tb_fps,
+        tb_record_last_only = False,
 
         num_record_episodes = objective_data.trial_args.tb_record_episodes,
         deterministic = objective_data.trial_args.eval_deterministic,

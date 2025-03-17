@@ -28,9 +28,11 @@ class RecordFlag(Flag):
     REWARD = auto()
     CRITIC = auto()
 
-    ALL = VEDIO | REWARD | CRITIC
+    SUCCESS = auto()
 
-    NORMAL = VEDIO | REWARD
+    ALL = VEDIO | REWARD | CRITIC | SUCCESS
+
+    NORMAL = VEDIO | REWARD | SUCCESS
 
 class RecordBuf:
     def __init__(self, num_envs: int, record_flag: RecordFlag, test_flag: RecordFlag):
@@ -105,14 +107,28 @@ def eval_record(
         pbar.set_description_str("Model Evaling")
     else:
         pbar = None
+    
+    success_evals = 0
 
     def eval_record_callback(_locals: Dict[str, Any], _globals: Dict[str, Any]):
         nonlocal num_episode
+        nonlocal success_evals
+        nonlocal record_flag
+
+        i = _locals["i"]
+        done = _locals["done"]
+
+        # 关于成功率的部分独立记录
+        if done:
+            if RecordFlag.SUCCESS in record_flag:
+                if "is_success" in _locals["info"]:
+                    if _locals["info"]["is_success"]:
+                        success_evals += 1
+                else:
+                    warnings.warn("Info 中没有键 is_success, 无法记录成功率")
+                    record_flag = record_flag & (~RecordFlag.SUCCESS)
 
         if num_episode < num_record_episodes:
-
-            i = _locals["i"]
-            done = _locals["done"]
 
             if vedio_buf.is_available():
                 # done 时, 当前状态为新环境, 尝试插入黑色图片
@@ -128,25 +144,28 @@ def eval_record(
                 critic_buf.append(i, get_critic(model, _locals["observations"][i])) # type: ignore
 
             if done:
-                with TickAnalysis(f"记录第 {num_episode} 个视频", __name__):
-                    vedio_record_callback(
-                        num_episode, 
-                        vedio_buf.get_res(i), #type:ignore 
-                        reward_buf.get_res(i), #type:ignore 
-                        critic_buf.get_res(i) #type:ignore 
-                    )
+                vedio_record_callback(
+                    num_episode, 
+                    vedio_buf.get_res(i), #type:ignore 
+                    reward_buf.get_res(i), #type:ignore 
+                    critic_buf.get_res(i), #type:ignore
+                )
 
-                    num_episode += 1
+                num_episode += 1
 
-                    if pbar != None:
-                        pbar.update()
+                if pbar != None:
+                    pbar.update()
 
     eval_res = evaluate_policy(model, env, n_eval_episodes, deterministic, callback = eval_record_callback, **kwargs)
     
     if pbar != None:
         pbar.close()
 
-    return eval_res
+    success_rate = None
+    if RecordFlag.SUCCESS in record_flag:
+        success_rate = float(success_evals / n_eval_episodes)
+
+    return eval_res, success_rate
 
 def eval_record_to_tensorbard(
     model: "type_aliases.PolicyPredictor",
@@ -204,6 +223,7 @@ def eval_record_to_file(
     env: Union[VecEnv, VecEnvWrapper],
 
     save_root: Union[Path, str],
+    save_name_prefix: Optional[str] = None,
     use_timestamp: bool = True,
     is_save_return_plot: bool = True,
 
@@ -228,10 +248,14 @@ def eval_record_to_file(
 
     save_root = Path(save_root)
     if use_timestamp:
-        save_root = save_root.joinpath(get_file_time_str())
+        dir_name = get_file_time_str()
+        if save_name_prefix is not None:
+            dir_name = save_name_prefix + dir_name
+            
+        save_root = save_root.joinpath(dir_name)
     
     if not save_root.exists():
-        os.mkdir(save_root)
+        os.makedirs(save_root)
     vedio_name_pattern = save_root.joinpath("{}.gif").as_posix()
     plot_name_pattern = save_root.joinpath("{}.png").as_posix()
 
@@ -268,9 +292,13 @@ def eval_record_to_file(
         if critic_list is not None:
             critic_buf.append(critic_buf)
 
-    origin_res = eval_record(
-        model, env, tb_callback, num_record_episodes, record_flag, verbose, n_eval_episodes, deterministic, **kwargs
+    origin_res, success_rate = eval_record(
+        model, env, tb_callback, num_record_episodes, record_flag, verbose, n_eval_episodes, deterministic, return_episode_rewards = True, **kwargs
     )
+
+    assert isinstance(origin_res[0], list) and isinstance(origin_res[1], list), "保证参数 return_episode_rewards 为 True"
+    return_list = np.asarray(origin_res[0])
+    lenth_list = np.asarray(origin_res[1])
 
     if len(reward_buf) > 0:
         with open(save_root.joinpath("reward.npz"), 'wb') as f:
@@ -285,5 +313,19 @@ def eval_record_to_file(
                 f, 
                 *critic_buf
             )
-    
+
+    if is_save_return_plot:
+
+        fig, axe = plt.subplots()
+        axe.hist(return_list)
+
+        title_str = f"ra: {np.mean(return_list):.3f} rs: {np.std(return_list):.3f} al: {np.mean(lenth_list):.3f} "
+        if success_rate is not None:
+            title_str += f"sr: {success_rate:.3f}"
+
+        axe.set_title(title_str)
+        fig.savefig(plot_name_pattern.format("summary"))
+
+        plt.close(fig)
+
     return origin_res
