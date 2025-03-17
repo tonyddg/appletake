@@ -23,6 +23,7 @@ def make_backbone(pth_path: str):
     return effnet_b0.backbone
 
 T_SIZE = 224
+V_SIZE = 128
 
 CORNER_W = 336
 CORNER_YOF = 60
@@ -50,7 +51,7 @@ exp_replace_arg_dict = dict_factory({
         ),
         get_coppeliasim_depth_normalize(),
         get_depth_aug(0.9, 1),
-        A.Normalize((0.536), (0.28), 1),
+        A.Normalize((0.54), (0.276), 1),
         get_hwc2chw(False)
     ]),
     'corner_ext_train_trans': A.Compose([
@@ -59,7 +60,7 @@ exp_replace_arg_dict = dict_factory({
         ),
         get_coppeliasim_depth_normalize(),
         get_depth_aug(0.8, 2),
-        A.Normalize((0.536), (0.28), 1),
+        A.Normalize((0.54), (0.276), 1),
         get_hwc2chw(False)
     ]),
 
@@ -76,7 +77,7 @@ exp_replace_arg_dict = dict_factory({
         ),
         get_coppeliasim_depth_normalize(),
         get_depth_aug(0.9, 1),
-        A.Normalize((0.67), (0.27), 1),
+        A.Normalize((0.57), (0.30), 1),
         get_hwc2chw(False)
     ]),
     'paralle_ext_train_trans': A.Compose([
@@ -85,7 +86,7 @@ exp_replace_arg_dict = dict_factory({
         ),
         get_coppeliasim_depth_normalize(),
         get_depth_aug(0.8, 2),
-        A.Normalize((0.67), (0.27), 1),
+        A.Normalize((0.57), (0.30), 1),
         get_hwc2chw(False)
     ]),
 
@@ -115,7 +116,95 @@ exp_replace_arg_dict = dict_factory({
         get_hwc2chw(False)
     ]),
 
-    "reward_dist_fn": RewardLinearDistance()
+    ###
+
+    'corner_hard_vec_trans': A.Compose([
+        get_crop_resize(
+            (1280 - CORNER_W) // 2 + CORNER_XOF, (720 - CORNER_W) // 2 + CORNER_YOF, (1280 + CORNER_W) // 2 + CORNER_XOF, (720 + CORNER_W) // 2 + CORNER_YOF, V_SIZE, V_SIZE
+        ),
+        get_coppeliasim_depth_normalize(),
+        get_depth_aug(0.95, 0.5),
+        A.Normalize((0.54), (0.27), 1),
+        get_hwc2chw(True)
+    ]),
+    'corner_hard_ext_trans': A.Compose([
+        get_crop_resize(
+            (1280 - CORNER_W) // 2 + CORNER_XOF, (720 - CORNER_W) // 2 + CORNER_YOF, (1280 + CORNER_W) // 2 + CORNER_XOF, (720 + CORNER_W) // 2 + CORNER_YOF, T_SIZE, T_SIZE
+        ),
+        get_coppeliasim_depth_normalize(),
+        get_depth_aug(0.95, 1.5),
+        A.Normalize((0.54), (0.27), 1),
+        get_hwc2chw(False)
+    ]),
+    'corner_hard_ext_train_trans': A.Compose([
+        get_crop_resize(
+            (1280 - CORNER_W) // 2 + CORNER_XOF, (720 - CORNER_W) // 2 + CORNER_YOF, (1280 + CORNER_W) // 2 + CORNER_XOF, (720 + CORNER_W) // 2 + CORNER_YOF, T_SIZE, T_SIZE
+        ),
+        get_coppeliasim_depth_normalize(),
+        get_depth_aug(0.8, 2),
+        A.Normalize((0.54), (0.27), 1),
+        get_hwc2chw(False)
+    ]),
+
+    'paralle_hard_vec_trans': A.Compose([
+        get_crop_resize(
+            (1280 - PARALLE_W) // 2 + PARALLE_XOF, (720 - PARALLE_W) // 2 + PARALLE_YOF, (1280 + PARALLE_W) // 2 + PARALLE_XOF, (720 + PARALLE_W) // 2 + PARALLE_YOF, V_SIZE, V_SIZE
+        ),
+        get_coppeliasim_depth_normalize(),
+        get_depth_aug(0.95, 0.5),
+        A.Normalize((0.56), (0.30), 1),
+        get_hwc2chw(False)
+    ]),
+    'paralle_hard_ext_trans': A.Compose([
+        get_crop_resize(
+            (1280 - PARALLE_W) // 2 + PARALLE_XOF, (720 - PARALLE_W) // 2 + PARALLE_YOF, (1280 + PARALLE_W) // 2 + PARALLE_XOF, (720 + PARALLE_W) // 2 + PARALLE_YOF, T_SIZE, T_SIZE
+        ),
+        get_coppeliasim_depth_normalize(),
+        get_depth_aug(0.95, 1.5),
+        A.Normalize((0.56), (0.30), 1),
+        get_hwc2chw(False)
+    ]),
+    'paralle_hard_ext_train_trans': A.Compose([
+        get_crop_resize(
+            (1280 - PARALLE_W) // 2 + PARALLE_XOF, (720 - PARALLE_W) // 2 + PARALLE_YOF, (1280 + PARALLE_W) // 2 + PARALLE_XOF, (720 + PARALLE_W) // 2 + PARALLE_YOF, T_SIZE, T_SIZE
+        ),
+        get_coppeliasim_depth_normalize(),
+        get_depth_aug(0.8, 2),
+        A.Normalize((0.56), (0.30), 1),
+        get_hwc2chw(False)
+    ]),
+
+    'three_hard_vec_trans': A.Compose([
+        get_crop_resize(
+            (1280 - THREE_W) // 2 + THREE_XOF, (720 - THREE_W) // 2 + THREE_YOF, (1280 + THREE_W) // 2 + THREE_XOF, (720 + THREE_W) // 2 + THREE_YOF, V_SIZE, V_SIZE
+        ),
+        get_coppeliasim_depth_normalize(),
+        get_depth_aug(0.95, 0.5),
+        A.Normalize((0.38), (0.3), 1),
+        get_hwc2chw(False)
+    ]),
+    'three_hard_ext_trans': A.Compose([
+        get_crop_resize(
+            (1280 - THREE_W) // 2 + THREE_XOF, (720 - THREE_W) // 2 + THREE_YOF, (1280 + THREE_W) // 2 + THREE_XOF, (720 + THREE_W) // 2 + THREE_YOF, T_SIZE, T_SIZE
+        ),
+        get_coppeliasim_depth_normalize(),
+        get_depth_aug(0.95, 1.5),
+        A.Normalize((0.38), (0.3), 1),
+        get_hwc2chw(False)
+    ]),
+    'three_hard_ext_train_trans': A.Compose([
+        get_crop_resize(
+            (1280 - THREE_W) // 2 + THREE_XOF, (720 - THREE_W) // 2 + THREE_YOF, (1280 + THREE_W) // 2 + THREE_XOF, (720 + THREE_W) // 2 + THREE_YOF, T_SIZE, T_SIZE
+        ),
+        get_coppeliasim_depth_normalize(),
+        get_depth_aug(0.8, 2),
+        A.Normalize((0.38), (0.3), 1),
+        get_hwc2chw(False)
+    ]),
+
+    ###
+
+    "reward_dist_fn": RewardLinearDistance(),
 })
 
 exp_exec_arg_dict = dict_factory({

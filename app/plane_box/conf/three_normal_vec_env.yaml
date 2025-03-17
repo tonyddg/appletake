@@ -22,6 +22,11 @@ train_env:
     env_vis_persp_deg_disturb: 1
     env_movbox_height_offset_range: [-0.03, 0.02]
 
+    env_movebox_center_err: [
+        [-5, -5, -5, 0, 0, -5],
+        [5, 5, 5, 0, 0, 5]
+    ]
+
     env_reward_fn: "@reward_dist_fn"
     act_unit: [5, 5, 5, 1, 1, 1]
 
@@ -57,6 +62,11 @@ eval_env:
     env_vis_persp_deg_disturb: 1
     env_movbox_height_offset_range: [-0.03, 0.02]
 
+    env_movebox_center_err: [
+        [-5, -5, -5, 0, 0, -5],
+        [5, 5, 5, 0, 0, 5]
+    ]
+    
     env_reward_fn: "@reward_dist_fn"
     act_unit: [5, 5, 5, 1, 1, 1]
 

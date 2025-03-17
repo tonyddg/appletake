@@ -17,45 +17,97 @@ from src.conio.key_listen import ListenKeyPress, press_key_to_continue
 from src.gym_env.plane_box.plane_box import PlaneBoxEnvTest
 
 from finetuning.arg_dict import exp_exec_arg_dict, exp_replace_arg_dict
-from stable_baselines3 import SAC
+from stable_baselines3 import SAC, TD3
 
 from src.net.efficient_net import EfficientNetV1WithHead
 import torch
 
 import time
 
-if __name__ == "__main__":
+def eval3(OBJECT: str = "corner", ENV_TYPE: str = "ext", ENV_SET: str = "hard"):
+    # OBJECT = "corner"
+    # ENV_TYPE = "ext"
+    # ENV_SET = "hard"
 
-    OBJECT = "corner"
-    ENV_TYPE = "normal_ext"
+    RL_POLICY = SAC.load(f"runs/done/{OBJECT}_ply/sac_hard_tunedres/best_model.zip")
+    # RL_POLICY = SAC.load(f"runs/plane_box/corner_finetuning/ext_sac_wrong_hard/2025_03_11_00_41_53/best_model.zip")
 
-    ENV_CONF_PATH = Path(f"app/plane_box/conf/{OBJECT}_{ENV_TYPE}_env.yaml")
+    ENV_CONF_PATH = Path(f"app/plane_box/conf/{OBJECT}_{ENV_SET}_{ENV_TYPE}_env.yaml")
+    BASE_CONF_PATH = Path(f"app/plane_box/conf/base_hard_env.yaml")
 
+    effnet_b0 = EfficientNetV1WithHead(
+        6, 1, 1, 1
+    )
+    effnet_b0.load_state_dict(torch.load(f"runs/done/{OBJECT}_{ENV_SET}_ext/best.pth"))
+    effnet_b0.to(device = "cuda")
+    effnet_b0.train(False)
+
+    # 随机策略
     with SafePyRep(f"scene/plane_box/{OBJECT}_vec4_test2.ttt", True) as pr:
 
-        env_conf = load_exp_config(ENV_CONF_PATH)
+        env_conf = load_exp_config(BASE_CONF_PATH, ENV_CONF_PATH, is_resolve = True)
         env_conf.eval_env.wrapper = None
-
         eval_env = config_to_env(env_conf.eval_env, exp_replace_arg_dict({"pr": pr}), exp_exec_arg_dict())
-
-        effnet_b0 = EfficientNetV1WithHead(
-            6, 1, 1, 1
-        )
-        effnet_b0.load_state_dict(torch.load("runs/plane_box/corner_ext/2025_03_03_20_40_58/best.pth"))
-        effnet_b0.to(device = "cuda")
-        effnet_b0.train(False)
 
         print("eval start")
 
-        avg_red, std_red = eval_record_to_file(
-            ModelPredictor(effnet_b0), 
-            # RandomPolicy(eval_env.action_space, 2),
-            # SAC.load("runs/plane_box/corner_ply/ext_sac_2025_03_04_18_23_19/best_model.zip"),
+        # 测试 Optuna 保存的模型中, 性能下降的原因
+        eval_record_to_file(
+            RandomPolicy(eval_env.action_space, 2),
             eval_env, 
-            "runs/plane_box/corner_eval", 
+            f"runs/plane_box/{OBJECT}_{ENV_TYPE}_eval", 
+            save_name_prefix = "random_",
             n_eval_episodes = 50,
             num_record_episodes = 5,
             fps = 5
         )
 
-        print(f"avg: {avg_red}, std: {std_red}")
+        print("eval done")
+
+    # 深度学习策略
+    with SafePyRep(f"scene/plane_box/{OBJECT}_vec4_test2.ttt", True) as pr:
+
+        env_conf = load_exp_config(BASE_CONF_PATH, ENV_CONF_PATH, is_resolve = True)
+        env_conf.eval_env.wrapper = None
+        eval_env = config_to_env(env_conf.eval_env, exp_replace_arg_dict({"pr": pr}), exp_exec_arg_dict())
+
+        print("eval start")
+
+        # 测试 Optuna 保存的模型中, 性能下降的原因
+        eval_record_to_file(
+            ModelPredictor(effnet_b0), 
+            eval_env, 
+            f"runs/plane_box/{OBJECT}_{ENV_TYPE}_eval", 
+            save_name_prefix = "ml_",
+            n_eval_episodes = 50,
+            num_record_episodes = 5,
+            fps = 5
+        )
+
+        print("eval done")
+
+    # 强化学习策略
+    with SafePyRep(f"scene/plane_box/{OBJECT}_vec4_test2.ttt", True) as pr:
+
+        env_conf = load_exp_config(BASE_CONF_PATH, ENV_CONF_PATH, is_resolve = True)
+        eval_env = config_to_env(env_conf.eval_env, exp_replace_arg_dict({"pr": pr}), exp_exec_arg_dict())
+
+        print("eval start")
+
+        # 测试 Optuna 保存的模型中, 性能下降的原因
+        eval_record_to_file(
+            RL_POLICY,
+            eval_env, 
+            f"runs/plane_box/{OBJECT}_{ENV_TYPE}_eval", 
+            save_name_prefix = "sac_",
+            n_eval_episodes = 50,
+            num_record_episodes = 5,
+            fps = 5
+        )
+
+        print("eval done")
+
+if __name__ == "__main__":
+    # eval3("corner", "ext", "hard")
+    eval3("paralle", "ext", "hard")
+    # eval3("three", "ext", "hard")

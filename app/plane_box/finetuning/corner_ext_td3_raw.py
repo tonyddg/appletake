@@ -23,7 +23,8 @@ if __name__ == "__main__":
                 "app/plane_box/finetuning/ext_td3_raw.yaml",
                 merge_dict = {
                     "trial": {"meta_exp_root": "runs/plane_box/corner_finetuning/ext_td3"}
-                }
+                },
+                is_resolve = False
             ),
             sample_param_ext_td3,
             exp_name_suffix = None,

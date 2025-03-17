@@ -36,6 +36,11 @@ if __name__ == "__main__":
             env_action_noise = np.array([0.5, 0.5, 0.5, 0.1, 0.1, 0.1], dtype = np.float32),
             env_vis_persp_deg_disturb = 1,
             env_movbox_height_offset_range = (-0.03, 0.02),
+            env_movebox_center_err = (
+                np.array([-5, -5, -5, -2, -2, -5], dtype = np.float32),
+                np.array([5, 5, 5, 2, 2, 5], dtype = np.float32)
+            ),
+            
             env_tolerance_offset = -0.005,
 
             # Checker 长度为 50mm, 因此仅当箱子与垛盘间隙为 51~100 mm (1~50) 时可通过检查 
@@ -67,5 +72,6 @@ if __name__ == "__main__":
                     break
                 
                 pr.step()
+        tester.env._close_env()
 
         press_key_to_continue(idle_run = pr.step)

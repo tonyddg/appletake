@@ -12,11 +12,13 @@ if __name__ == "__main__":
 
         em = ExpManager(
             load_exp_config(
+                "app/plane_box/conf/base_normal_env.yaml",
                 "app/plane_box/conf/corner_normal_ext_env.yaml",
                 "app/plane_box/finetuning/ext_sac_raw.yaml",
                 merge_dict = {
                     "trial": {"meta_exp_root": "runs/plane_box/corner_finetuning/ext_sac"}
-                }
+                },
+                is_resolve = False
             ),
             sample_param_ext_sac,
             exp_name_suffix = None,

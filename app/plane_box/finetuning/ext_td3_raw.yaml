@@ -22,7 +22,7 @@ model:
         sigma: "${sample.noise_std}"
 
 trial:
-  total_timesteps: 25000
+  total_timesteps: 30000
 
   meta_manual_seed: 0
   meta_exp_root: "runs/plane_box/corner_finetuning/ext_td3"
@@ -34,3 +34,4 @@ trial:
 
   tb_record_episodes: 5
   tb_record_flag: 'ALL'
+  tb_record_last_only: True

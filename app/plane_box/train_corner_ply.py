@@ -11,10 +11,13 @@ if __name__ == "__main__":
 
         train_model(
             load_exp_config(
-                "runs/plane_box/corner_finetuning/ext_sac/2025_03_04_15_50_07/config.yaml",
+                "app/plane_box/conf/base_hard_env.yaml",
+                "app/plane_box/conf/corner_hard_ext_env.yaml",
+                "app/plane_box/tuned/hard_ext_sac.yaml",
+                is_resolve = True
             ),
             verbose = 1,
-            exp_root = "runs/plane_box/corner_ply/ext_sac",
+            exp_root = "runs/plane_box/corner_ply/hard_ext_sac",
             exp_replace_arg_dict = exp_replace_arg_dict({
                 "pr": pr
             }),

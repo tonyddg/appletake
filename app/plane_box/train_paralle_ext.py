@@ -24,7 +24,11 @@ if __name__ == "__main__":
 
     replace_arg_dict = exp_replace_arg_dict()
 
-    cfg = OmegaConf.to_container(load_exp_config("app/plane_box/conf/paralle_trainext_vec_env.yaml"))
+    cfg = OmegaConf.to_container(load_exp_config(
+        "app/plane_box/conf/base_hard_ext.yaml",
+        "app/plane_box/conf/paralle_trainext_vec_env.yaml",
+        is_resolve = True
+    ))
     assert isinstance(cfg, Dict)
     cfg = config_data_replace(cfg, replace_arg_dict)
 
@@ -32,12 +36,12 @@ if __name__ == "__main__":
     eval_env_kwargs = cfg["eval_env"]["kwargs"] # type: ignore
 
     train_dataset = PrEnvRenderDataset(
-        ParalleEnv, "scene/plane_box/paralle_vec4.ttt", train_env_kwargs, num_epoch_data = 51200
+        ParalleEnv, "scene/plane_box/paralle_vec4_test2.ttt", train_env_kwargs, num_epoch_data = 51200
     )
     train_dl = DataLoader(train_dataset, 64, num_workers = 4)
 
     test_dataset = PrEnvRenderDataset(
-        ParalleEnv, "scene/plane_box/paralle_vec4.ttt", eval_env_kwargs, num_epoch_data = 10240
+        ParalleEnv, "scene/plane_box/paralle_vec4_test2.ttt", eval_env_kwargs, num_epoch_data = 10240
     )
     test_dl = DataLoader(test_dataset, 64, num_workers = 4)
 

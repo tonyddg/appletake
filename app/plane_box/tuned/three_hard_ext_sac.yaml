@@ -1,0 +1,26 @@
+model:
+  type: stable_baselines3:SAC
+  kwargs:
+    policy: MlpPolicy
+    policy_kwargs:
+      net_arch:
+      - 128
+    batch_size: 1024
+    learning_rate: 0.004
+    buffer_size: 20000
+    learning_starts: 0
+    train_freq: 1
+    gradient_steps: 1
+    gamma: 0.9
+    tau: 0.1
+trial:
+  total_timesteps: 20000
+  meta_manual_seed: 0
+  meta_exp_root: runs
+  meta_exp_name: trial
+  eval_freq: 1000
+  eval_num_episodes: 50
+  eval_pruner_warmup_ratio: 0.7
+  tb_record_episodes: 5
+  tb_record_flag: ALL
+  meta_object_path: runs

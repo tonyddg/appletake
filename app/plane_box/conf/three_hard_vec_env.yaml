@@ -1,0 +1,36 @@
+train_env:
+  type: 'src.gym_env.plane_box.three:ThreeEnv'
+  kwargs:
+    obs_trans: "@three_hard_vec_trans"
+    three_fixbox_size_range:
+      - [0.12, 0.12, 0.15]
+      - [0.30, 0.30, 0.20]
+
+  wrapper: ~
+
+eval_env:
+  type: "${train_env.type}"
+  kwargs:
+    subenv_range: [4, 6]
+
+    env_pr: "${train_env.kwargs.env_pr}"
+    subenv_mid_name : "${train_env.kwargs.subenv_mid_name}"
+
+    obs_trans: "${train_env.kwargs.obs_trans}"
+    obs_source: "${train_env.kwargs.obs_source}"
+
+    env_init_box_pos_range: "${train_env.kwargs.env_init_box_pos_range}"
+    env_init_vis_pos_range: "${train_env.kwargs.env_init_vis_pos_range}"
+    env_action_noise: "${train_env.kwargs.env_action_noise}"
+    env_vis_persp_deg_disturb: "${train_env.kwargs.env_vis_persp_deg_disturb}"
+    env_movbox_height_offset_range: "${train_env.kwargs.env_movbox_height_offset_range}"
+    env_movebox_center_err: "${train_env.kwargs.env_movebox_center_err}"
+    env_reward_fn: "${train_env.kwargs.env_reward_fn}"
+
+    act_unit: "${train_env.kwargs.act_unit}"
+    three_fixbox_size_range: "${train_env.kwargs.three_fixbox_size_range}"
+
+    env_tolerance_offset: "${train_env.kwargs.env_tolerance_offset}"
+    env_is_complexity_progression: False
+
+  wrapper: "${train_env.wrapper}"

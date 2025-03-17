@@ -24,7 +24,11 @@ if __name__ == "__main__":
 
     replace_arg_dict = exp_replace_arg_dict()
 
-    cfg = OmegaConf.to_container(load_exp_config("app/plane_box/conf/three_trainext_vec_env.yaml"))
+    cfg = OmegaConf.to_container(load_exp_config(
+        "app/plane_box/conf/base_hard_ext.yaml",
+        "app/plane_box/conf/three_trainext_vec_env.yaml",
+        is_resolve = True
+    ))
     assert isinstance(cfg, Dict)
     cfg = config_data_replace(cfg, replace_arg_dict)
 
@@ -32,43 +36,43 @@ if __name__ == "__main__":
     eval_env_kwargs = cfg["eval_env"]["kwargs"] # type: ignore
 
     train_dataset = PrEnvRenderDataset(
-        ThreeEnv, "scene/plane_box/three_vec4.ttt", train_env_kwargs, num_epoch_data = 51200
+        ThreeEnv, "scene/plane_box/three_vec4_test2.ttt", train_env_kwargs, num_epoch_data = 51200
     )
-    train_dl = DataLoader(train_dataset, 64, num_workers = 4)
+    # train_dl = DataLoader(train_dataset, 64, num_workers = 4)
 
-    test_dataset = PrEnvRenderDataset(
-        ThreeEnv, "scene/plane_box/three_vec4.ttt", eval_env_kwargs, num_epoch_data = 10240
-    )
-    test_dl = DataLoader(test_dataset, 64, num_workers = 4)
+    # test_dataset = PrEnvRenderDataset(
+    #     ThreeEnv, "scene/plane_box/three_vec4_test2.ttt", eval_env_kwargs, num_epoch_data = 10240
+    # )
+    # test_dl = DataLoader(test_dataset, 64, num_workers = 4)
 
-    effnet_b0 = EfficientNetV1WithHead(
-        6, 1, 1, 1
-    )
+    # effnet_b0 = EfficientNetV1WithHead(
+    #     6, 1, 1, 1
+    # )
 
-    # sample_test(train_dataset, 100, "tmp/plane_box/three_train_ext_sample", 4, 64)
+    sample_test(train_dataset, 100, "tmp/plane_box/three_train_ext_sample", 4, 64)
 
-    cfg = ModelTeacher.AdvanceConfig(
-        schedule_type = "restart_cos",
-        schedule_kwargs = {
-            "T_0": 10, 
-            "T_mult": 2, 
-            "eta_min": 0.0
-        },
-        is_use_adam = True
-    )
+    # cfg = ModelTeacher.AdvanceConfig(
+    #     schedule_type = "restart_cos",
+    #     schedule_kwargs = {
+    #         "T_0": 10, 
+    #         "T_mult": 2, 
+    #         "eta_min": 0.0
+    #     },
+    #     is_use_adam = True
+    # )
 
-    # 实验 1
-    mt = ModelTeacher(
-        effnet_b0, 
-        1e-3, 
-        train_dl, 
-        test_dl, 
-        "./runs/plane_box/three_ext", 
-        nn.SmoothL1Loss,
-        reg_mse_success_fn, 
-        advance_config = cfg
-    )
-    mt.train(70)
+    # # 实验 1
+    # mt = ModelTeacher(
+    #     effnet_b0, 
+    #     1e-3, 
+    #     train_dl, 
+    #     test_dl, 
+    #     "./runs/plane_box/three_ext", 
+    #     nn.SmoothL1Loss,
+    #     reg_mse_success_fn, 
+    #     advance_config = cfg
+    # )
+    # mt.train(70)
 
     # SmoothL1 防止难预测的异常情况导致的梯度爆炸
     # 大 dropout, 保证特征向量的各个值都能发挥作用 ?
