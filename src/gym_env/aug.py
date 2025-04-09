@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Union
+from typing import Union, Sequence
 import cv2
 import numpy as np
 import gymnasium as gym
@@ -36,39 +36,101 @@ def get_crop_resize(
         A.Resize(resize_height, resize_width, cv2.INTER_AREA)
     ], p = 1)
 
-def get_depth_aug(noise_p: float, noise_scale: float = 1):
+def multi_crop_stack(
+    x_min_list: Sequence[int] = [128], 
+    y_min_list: Sequence[int] = [128], 
+    x_max_list: Sequence[int] = [384], 
+    y_max_list: Sequence[int] = [384],
+    resize_height: int = 224,
+    resize_width: int = 224,
+):
+    alist = [
+        get_crop_resize(x_min, y_min, x_max, y_max, resize_height, resize_width)
+        for x_min, y_min, x_max, y_max in zip(x_min_list, y_min_list, x_max_list, y_max_list)
+    ]
+    def crop_stack(img, **param):
+        imglist = [
+            alist[i](image = img)["image"]
+            for i in range(len(alist))
+        ]
+        return np.stack(imglist, 2)
+    return A.Sequential([
+        A.Lambda(
+            image = crop_stack
+        )
+    ], p = 1)
+
+def _force_channel_diff_trans(img, origin_trans: A.Sequential, **params):
+    imglist = [
+        origin_trans(image = img[:, :, i])["image"]
+        for i in range(img.shape[2])
+    ]
+    return np.stack(imglist, 2)
+
+def get_force_channel_diff_trans(origin_trans: A.Sequential):
+    fn = partial(_force_channel_diff_trans, origin_trans = origin_trans)
+    return A.Sequential([
+        A.Lambda(
+            image = fn
+        )
+    ], p = 1)
+
+def get_coarse_aug(noise_p: float, noise_scale: float = 1, is_train: bool = False):
+    return A.Sequential([
+        # 模拟无法填充的大空洞 (防止模型仅关注特定区域)
+        A.CoarseDropout(
+            num_holes_range = (1, 3),
+            hole_height_range = (16, int(64 * noise_scale)),
+            hole_width_range = (16, int(64 * noise_scale)),
+            fill = 0,
+            p = noise_p / 2 if is_train else 0
+        ),
+        # 模拟小空洞
+        A.CoarseDropout(
+            num_holes_range = (4, int(16 * noise_scale)),
+            hole_height_range = (4, 16),
+            hole_width_range = (4, 16),
+            fill = 0,
+            p = noise_p
+        ),
+    ], p = 1)
+
+def get_depth_aug(noise_p: float, noise_scale: float = 1, is_train: bool = False):
     return A.Sequential([
 
         # 模拟深度估计误差
-        A.MotionBlur(
-            (int(2 * noise_scale + 1), int(2 * noise_scale + 3)), p = noise_p
-        ),
+        # A.MotionBlur(
+        #     (int(2 * noise_scale + 1), int(2 * noise_scale + 3)), p = noise_p
+        # ),
         A.GaussNoise(
-            (0.01 * noise_scale, 0.05 * noise_scale),
+            (0.02, 0.05 * noise_scale),
+            noise_scale_factor = 1,
+            p = noise_p
+        ),
+        
+        get_force_channel_diff_trans(get_coarse_aug(noise_p, noise_scale, is_train)),
+
+        # 模拟小空洞填充
+        # A.Morphological((4, 6), p = noise_p),
+        A.MedianBlur((5, 11), p = noise_p),
+    ], p = 1)
+
+def get_depth_aug_single_view(noise_p: float, noise_scale: float = 1, is_train: bool = False):
+    return A.Sequential([
+
+        A.GaussNoise(
+            (0.01, 0.08 * noise_scale),
             noise_scale_factor = 1,
             p = noise_p
         ),
 
-        # 模拟无法填充的空洞 (防止模型仅关注特定区域)
-        A.CoarseDropout(
-            num_holes_range = (1, int(3 * noise_scale)),
-            hole_height_range = (0.05 * noise_scale, 0.15 * noise_scale),
-            hole_width_range = (0.05 * noise_scale, 0.15 * noise_scale),
-            fill = 0,
-            p = noise_p
-        ),
-        A.CoarseDropout(
-            num_holes_range = (1, int(3 * noise_scale)),
-            hole_height_range = (0.04 * noise_scale, 0.12 * noise_scale),
-            hole_width_range = (0.04 * noise_scale, 0.12 * noise_scale),
-            fill = 1,
-            p = noise_p
-        ),
+        get_coarse_aug(noise_p, noise_scale, is_train),
 
         # 模拟小空洞填充
-        A.Morphological((4, 6), p = noise_p),
-        A.MedianBlur((9, 15), p = noise_p),
+        # A.Morphological((4, 6), p = noise_p),
+        A.MedianBlur((5, 11), p = noise_p),
     ], p = 1)
+
 
 def _hwc2chw(img: np.ndarray, to_sb3: bool = False, **param):
     if len(img.shape) == 3:
@@ -139,7 +201,7 @@ def get_depth_thresh_normalize(z_min: float, z_far: float):
         )
     ], p = 1)
 
-def get_coppeliasim_depth_normalize(vis_z_min: float = 1e-4, vis_z_far: float = 5e-1, new_z_min: float = 2.5e-1, new_z_far: float = 5e-1):
+def get_coppeliasim_depth_normalize(vis_z_min: float = 1e-4, vis_z_far: float = 6e-1, new_z_min: float = 2.5e-1, new_z_far: float = 6e-1):
     '''
     将 Coppeliasim 已经标准化的深度图重映射到新的范围 (防止 Coppeliasim 中 z_min 过大导致的穿透问题)
     '''
@@ -154,3 +216,13 @@ def get_coppeliasim_depth_normalize(vis_z_min: float = 1e-4, vis_z_far: float = 
             image = fn2
         )
     ], p = 1)
+
+# def indicat_aug(
+#     x_min_list: Sequence[int] = [128], 
+#     y_min_list: Sequence[int] = [128], 
+#     x_max_list: Sequence[int] = [384], 
+#     y_max_list: Sequence[int] = [384],
+#     resize_height: int = 224,
+#     resize_width: int = 224,
+# ):
+#     pass
