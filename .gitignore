@@ -17,3 +17,6 @@ tmp.*
 
 runs
 runs_bak
+*_bak
+
+model
