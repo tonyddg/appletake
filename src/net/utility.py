@@ -95,20 +95,22 @@ class ModelTeacher:
             # 传入批次, 输出平均, 越大越好, 传入 None 时以 -loss 代替
             # success_fn(y_predict: torch.Tensor, y_target: torch.Tensor) 
             success_fn: Optional[Callable[[torch.Tensor, torch.Tensor], float]] = None,
-            is_init_weight: bool = True,
-            advance_config: AdvanceConfig | None = None
+            # 取 init_weight = True 使用 Xavier 方法初始化网络参数, 取字符串则使用加载参数
+            init_weight: Union[str, bool] = False,
+            advance_config: Optional[AdvanceConfig] = None
         ):
         
         self.net = net
-        if is_init_weight:
+        if isinstance(init_weight, str):
+            self.net.load_state_dict(torch.load(init_weight))
+        elif init_weight:
             self.net.apply(init_weights)
+
         self.net.to("cuda")
 
         save_root = Path(save_root)
-        if not save_root.exists():
-            os.mkdir(save_root)
         self.save_dir = save_root.joinpath(get_file_time_str())
-        os.mkdir(self.save_dir)
+        os.makedirs(self.save_dir)
 
         if advance_config == None:
             self.cfg = ModelTeacher.AdvanceConfig()
@@ -152,6 +154,8 @@ class ModelTeacher:
                 self.schedule = WarmUpCosineLR(self.optimizer, warmup_epoch = 10, T_max = 50, eta_min_rate = 0.01)
             else:
                 self.schedule = WarmUpCosineLR(self.optimizer, **self.cfg.schedule_kwargs)
+        else:
+            self.schedule = None
 
     def train_epoch(self, epoches: int):
         '''

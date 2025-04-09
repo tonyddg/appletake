@@ -1,10 +1,11 @@
-
 from math import ceil
-from typing import Any, Callable, List, Literal, Optional, Union
+from typing import Any, Callable, List, Literal, Optional, Protocol, Union
 from torch import nn
 
 import torch
 import torchsummary
+
+from .net_abc import BackboneModule, BackboneWithHead
 
 def _make_divisible(ch: float, divisor: int = 8, min_ch: Optional[int] = None):
     '''
@@ -252,7 +253,7 @@ class MBConvStage(nn.Module):
         # print(res.shape)
         return res
 
-class EfficientNetV1Backbone(nn.Module):
+class EfficientNetV1Backbone(BackboneModule):
     def __init__(self,
                  in_channel: int,
                  width_coefficient: float,          # 宽度倍率因子 (特征通道数)
@@ -376,25 +377,22 @@ EFFNET_V2_STAGE_CNF = {
         },
 }
 
-class EfficientNetV2Backbone(nn.Module):
+class EfficientNetV2Backbone(BackboneModule):
     def __init__(self,
                  in_channel: int,
-                 stage_cnf: List[Any],
-                 stem_out_ch: int,
-                 drop_connect_rate: float = 0.2,    # 控制 SE 模块里的 dropout
+                 stage_cnf_name: Literal['s', 'm', 'l', 'xl'],
+                #  stem_out_ch: int,
+                #  drop_connect_rate: float = 0.2,    # 控制 SE 模块里的 dropout
                  ):
         super().__init__()
 
+        stage_cnf = EFFNET_V2_STAGE_CNF[stage_cnf_name]["stage_cnf"]
+        stem_out_ch = EFFNET_V2_STAGE_CNF[stage_cnf_name]["stem_out_ch"]
+        drop_connect_rate = EFFNET_V2_STAGE_CNF[stage_cnf_name]["drop_connect_rate"]
+
         stem_out_channel = stem_out_ch
         head_out_feat = 1280
-        
-        stage_cnf = [[FusedMBConvBlock, 24 , 1, 1, 2],
-                     [FusedMBConvBlock, 48 , 4, 2, 4],
-                     [FusedMBConvBlock, 64 , 4, 2, 4],
-                     [MBConvBlock     , 128, 4, 2, 6],
-                     [MBConvBlock     , 160, 6, 1, 9],
-                     [MBConvBlock     , 256, 6, 2, 15]]
-        
+
         # 基于两个因子调整基础配置
         _num_blocks = 0
         for i in range(len(stage_cnf)):
@@ -448,78 +446,21 @@ class EfficientNetV2Backbone(nn.Module):
     
     def get_out_feat_size(self):
         return self.out_feat_size 
-    
-class EfficientNetV1WithHead(nn.Module):
-    def __init__(self,
-                 num_classes: int,
-                 in_channel: int,
-                 width_coefficient: float,          # 宽度倍率因子 (特征通道数)
-                 depth_coefficient: float,          # 深度倍率因子 (Stage 深度)
-                 drop_connect_rate: float = 0.2,    # 控制 SE 模块里的 dropout
-                 head_drop_out: float = 0.2,
-                 ):
-        super().__init__()
-        self.backbone = EfficientNetV1Backbone(
-            in_channel,
-            width_coefficient,      
-            depth_coefficient,      
-            drop_connect_rate
-        )
-        self.cls_head = nn.Sequential(
-            nn.Dropout(head_drop_out, True),
-            nn.Linear(
-                self.backbone.get_out_feat_size(), num_classes
-            )
-        )
-
-        nn.init.normal_(self.cls_head[1].weight, 0, 0.01) # type: ignore
-        nn.init.zeros_(self.cls_head[1].bias) # type: ignore
-
-    def forward(self, X):
-        X = self.backbone(X)
-        # print(X.shape)
-        return self.cls_head(X)
-
-    def review(self):
-        device = str(next(self.parameters()).device)
-        torchsummary.summary(self, (3, 224, 224), device = device)
-
-class EfficientNetV2WithHead(nn.Module):
-    def __init__(self,
-                 num_classes: int,
-                 in_channel: int,
-                 stage_cnf: List[Any],
-                 stem_out_ch: int,
-                 drop_connect_rate: float = 0.2,
-                 ):
-        super().__init__()
-        self.backbone = EfficientNetV2Backbone(
-            in_channel,
-            stage_cnf,
-            stem_out_ch,
-            drop_connect_rate,
-        )
-        self.cls_head = nn.Sequential(
-            nn.Dropout(drop_connect_rate, True),
-            nn.Linear(
-                self.backbone.get_out_feat_size(), num_classes
-            )
-        )
-
-        nn.init.normal_(self.cls_head[1].weight, 0, 0.01) # type: ignore
-        nn.init.zeros_(self.cls_head[1].bias) # type: ignore
-
-    def forward(self, X):
-        X = self.backbone(X)
-        # print(X.shape)
-        return self.cls_head(X)
-
-    def review(self):
-        device = str(next(self.parameters()).device)
-        torchsummary.summary(self, (3, 384, 384), device = device)
 
 if __name__ == "__main__":
-    net = EfficientNetV2WithHead(
-        1000, 3, **EFFNET_V2_STAGE_CNF["s"] # type: ignore
+    # net = BackboneWithHead(
+    #     EfficientNetV2Backbone(
+    #         3, **EFFNET_V2_STAGE_CNF["s"] # type: ignore
+    #     ), 1000, 0.2
+    # )
+    net = BackboneWithHead(
+        EfficientNetV1Backbone(
+            3, 1, 1, 0.2
+        ), 6, 0.2
     )
-    net.review()
+    # net = BackboneWithHead(
+    #     EfficientNetV1Backbone(
+    #         3, 1.1, 1.2, 0.2
+    #     ), 6, 0.3
+    # )
+    net.review((3, 224, 224))

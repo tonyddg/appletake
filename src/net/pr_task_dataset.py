@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import signal
 from typing import Any, Dict, Iterator, List, Optional, Union
@@ -154,7 +155,7 @@ class PrEnvRenderIter(Iterator):
 
         return obs, label
     
-def sample_test(dataset: PrEnvRenderDataset, sample_times: int, sample_savepath: Optional[Union[Path, str]], num_workers: int = 2, batchsize: int = 64, alpha: float = 0.98):
+def sample_test(dataset: PrEnvRenderDataset, sample_times: int, sample_savepath: Optional[Union[Path, str]], num_workers: int = 2, batchsize: int = 64, alpha: float = 0.98, is_seprate_channel: bool = True):
     
     dl = DataLoader(dataset, batchsize, num_workers = num_workers)
     
@@ -191,14 +192,23 @@ def sample_test(dataset: PrEnvRenderDataset, sample_times: int, sample_savepath:
         fig.set_layout_engine("compressed")
         fig.set_size_inches(32, 24)
 
+        obs_c = last_obs.shape[1]
+
         for i, axe in enumerate(axes.values()):
-            img = torch.squeeze(last_obs[i]).cpu().numpy()
+            if is_seprate_channel:
+                img = torch.squeeze(last_obs[i // obs_c, i % obs_c]).cpu().numpy()
+                axe.set_title(f"label: {str(last_label[i // obs_c])}")
+            else:
+                img = torch.permute(last_obs[i], (1, 2, 0)).cpu().numpy()
+                axe.set_title(f"label: {str(last_label[i])}")
+            axe.plot
             axe.imshow(img)
-            axe.set_title(f"label: {str(last_label[i])}")
             axe.set_xticks([])
             axe.set_yticks([])
         
         sample_savepath = Path(sample_savepath)
+        if not sample_savepath.exists():
+            os.makedirs(sample_savepath)
         fig.savefig(sample_savepath.joinpath(get_file_time_str() + ".png").as_posix())
     
     print(f"sample speed: {avg_sample_times}s/batch")
