@@ -8,6 +8,7 @@ import warnings
 
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv, VecEnvWrapper
+from stable_baselines3.common.off_policy_algorithm import OffPolicyAlgorithm
 
 from .eval_record import eval_record_to_tensorbard, RecordFlag, evaluate_policy
 
@@ -33,7 +34,18 @@ class TensorboardEvalCallback(BaseCallback):
 
             tb_record_last_only: bool = False,
 
-            save_model: bool = True,
+            # # "train/critic_loss"
+            # tb_log_critic_loss_name: Optional[str] = None,
+            # # "train/actor_loss"
+            # tb_log_actor_loss_name: Optional[str] = None,
+            
+            # 从 stable-baseline 的 logger 中记录数据
+            # 键: tb 标签, 值: logger 路径
+            tb_rollout_log_record_dict: Optional[dict[str, str]] = None,
+
+            save_last_model: bool = True,
+            save_best_model: bool = True,
+            save_replay_buff: bool = True,
             save_data: bool = True,
             save_root: Optional[Union[str, Path]] = None,
 
@@ -63,14 +75,23 @@ class TensorboardEvalCallback(BaseCallback):
             self.eval_env = eval_env
 
         ### Tensorboard 相关属性
+        self.tb_eval_summary_root = tb_eval_summary_root
         # 使用平均的方式记录结果
-        self.tb_eval_return_avg_tag = tb_eval_summary_root + "/eval_return_avg"
+        self.tb_eval_return_avg_tag = self.tb_eval_summary_root + "/eval_return_avg"
         # 使用直方图的方式记录结果
-        self.tb_eval_return_hist_tag = tb_eval_summary_root + "/eval_return_hist"
+        self.tb_eval_return_hist_tag = self.tb_eval_summary_root + "/eval_return_hist"
         # 使用长度记录结果
-        self.tb_eval_length_avg_tag = tb_eval_summary_root + "/eval_length_avg"
+        self.tb_eval_length_avg_tag = self.tb_eval_summary_root + "/eval_length_avg"
         # 使用成功率记录结果
-        self.tb_eval_success_rate_tag = tb_eval_summary_root + "/eval_success_rate"
+        self.tb_eval_success_rate_tag = self.tb_eval_summary_root + "/eval_success_rate"
+        
+        # 记录损失
+        # self.tb_log_critic_loss_name = tb_log_critic_loss_name
+        # self.tb_log_actor_loss_name = tb_log_actor_loss_name
+        # self.tb_update_actor_loss_tag = tb_eval_summary_root + "/update_actor_loss"
+        # self.tb_update_critic_loss_tag = tb_eval_summary_root + "/update_critic_loss"
+        self.tb_rollout_log_record_dict = tb_rollout_log_record_dict
+
         # 记录各次实验结果
         self.tb_eval_tag_prefix = tb_eval_tag_prefix
         self.tb_record_flag = tb_record_flag
@@ -84,7 +105,9 @@ class TensorboardEvalCallback(BaseCallback):
 
         # 数据保存相关设置
         if save_root is not None:
-            self.save_model = save_model
+            self.save_last_model = save_last_model
+            self.save_best_model = save_best_model
+            self.save_replay_buff = save_replay_buff
             self.save_data = save_data
 
             if not isinstance(save_root, Path):
@@ -94,11 +117,22 @@ class TensorboardEvalCallback(BaseCallback):
             if not self.save_root.exists():
                 os.mkdir(self.save_root)
         else:
-            self.save_model = False
+            self.save_last_model = False
+            self.save_best_model = False
+            self.save_replay_buff = False
             self.save_data = False
 
-        if self.save_model:
-            self.model_save_path = self.save_root.joinpath("best_model")
+        if self.save_best_model:
+            self.best_model_save_path = self.save_root.joinpath("best_model")
+        if self.save_last_model:
+            self.last_model_save_path = self.save_root.joinpath("last_model")
+        if save_replay_buff:
+            self.buff_save_path = self.save_root.joinpath("replay_buff")
+            # if isinstance(self.model, OffPolicyAlgorithm):
+            #     self.buff_save_path = self.save_root.joinpath("replay_buff")
+            # else:
+            #     warnings.warn("非 Off Policy 策略没有回放队列")
+            #     self.save_replay_buff = False
         if self.save_data:
             self.data_save_path = self.save_root.joinpath("data.npz")
             self.episode_return_hist_buf = []
@@ -195,9 +229,18 @@ class TensorboardEvalCallback(BaseCallback):
 
             self.best_result = self.last_result
             
-            if self.save_model:
-                self.model.save(self.model_save_path)
-        
+            if self.save_best_model:
+                self.model.save(self.best_model_save_path)
+
+        if self.save_last_model:
+            self.model.save(self.last_model_save_path)
+        if self.save_replay_buff:
+            if isinstance(self.model, OffPolicyAlgorithm):
+                self.model.save_replay_buffer(self.buff_save_path)
+            else:
+                warnings.warn("非 Off Policy 策略没有回放队列")
+                self.save_replay_buff = False
+
         if self.save_data:
             self.episode_return_hist_buf.append(episode_return_list)
             self.episode_length_hist_buf.append(episode_length_list)
@@ -227,6 +270,36 @@ class TensorboardEvalCallback(BaseCallback):
                     episode_length_hist = np.stack(self.episode_length_hist_buf)
                 )
         self.tb_writer.close()
+
+    def _on_rollout_start(self) -> None:
+
+        if self.tb_rollout_log_record_dict is None:
+            return
+
+        iterations = self.num_timesteps # self.model.logger.name_to_value.get("train/n_updates", 0)
+        for log_tag, log_path in self.tb_rollout_log_record_dict.items():
+            val = self.model.logger.name_to_value.get(log_path, 0)
+            self.tb_writer.add_scalar(
+                self.tb_eval_summary_root + '/' + log_tag,
+                val,
+                iterations,
+            )
+
+        # if self.tb_log_critic_loss_name is not None:
+        #     critic_loss = self.model.logger.name_to_value.get(self.tb_log_critic_loss_name, 0)
+        #     self.tb_writer.add_scalar(
+        #         self.tb_update_critic_loss_tag,
+        #         critic_loss,
+        #         updates,
+        #     )
+
+        # if self.tb_log_actor_loss_name is not None:
+        #     actor_loss = self.model.logger.name_to_value.get(self.tb_log_actor_loss_name, 0)
+        #     self.tb_writer.add_scalar(
+        #         self.tb_update_actor_loss_tag,
+        #         actor_loss,
+        #         updates,
+        #     )
 
 class TensorboardEpReturnCallback(BaseCallback):
     def __init__(
@@ -281,7 +354,13 @@ class OptunaEvalCallback(TensorboardEvalCallback):
         tb_record_flag: RecordFlag = RecordFlag.NORMAL,
         tb_record_last_only: bool = False,
 
-        save_model: bool = True,
+        # tb_log_critic_loss_name: Optional[str] = None,
+        # tb_log_actor_loss_name: Optional[str] = None,
+        tb_rollout_log_record_dict: Optional[dict[str, str]] = None,
+
+        save_last_model: bool = True,
+        save_best_model: bool = True,
+        save_replay_buff: bool = True,
         save_data: bool = True,
         save_root: Optional[Union[str, Path]] = None,
 
@@ -291,7 +370,8 @@ class OptunaEvalCallback(TensorboardEvalCallback):
 
         **eval_kwargs
     ):
-        super().__init__(tb_writer, eval_freq, n_eval_episodes, deterministic, return_gamma, eval_env, tb_eval_tag_prefix, tb_eval_summary_root, tb_record_flag, tb_record_last_only, save_model, save_data, save_root, num_record_episodes, fps, verbose, **eval_kwargs)
+        super().__init__(
+            tb_writer, eval_freq, n_eval_episodes, deterministic, return_gamma, eval_env, tb_eval_tag_prefix, tb_eval_summary_root, tb_record_flag, tb_record_last_only, tb_rollout_log_record_dict, save_last_model, save_best_model, save_replay_buff, save_data, save_root, num_record_episodes, fps, verbose, **eval_kwargs)
         self.optuna_trial = optuna_trial
         self.optuna_is_use_pruner = optuna_is_use_pruner
 

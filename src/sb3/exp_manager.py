@@ -17,6 +17,7 @@ from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv, VecEnvWrapper
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.callbacks import CallbackList
+from stable_baselines3.common.off_policy_algorithm import OffPolicyAlgorithm
 
 from .tensorboard_callback import OptunaEvalCallback, TensorboardEpReturnCallback, TensorboardEvalCallback
 from ..utility import get_file_time_str
@@ -52,6 +53,12 @@ class TrialArgs:
     tb_record_flag: RecordFlag = RecordFlag["NORMAL"]
 
     tb_record_last_only: bool = False
+
+    # {
+    #     "critic_loss": "train/critic_loss",
+    #     "actor_loss": "train/actor_loss"
+    # }
+    tb_rollout_log_record_dict: Optional[dict[str, str]] = None
 
 @dataclass
 class ObjectiveArgs:
@@ -177,6 +184,17 @@ def config_to_model(model_cfg: DictConfig, train_env: LegalEnvType, replace_arg_
 
     assert isinstance(model, LegalModelType)
 
+    continue_weight_path = model_cfg.get("continue_weight_path", None)
+    continue_reply_buff = model_cfg.get("continue_reply_buff", None)
+    if continue_weight_path is not None:
+        model = model.load(continue_weight_path)
+        model.set_env(train_env)
+    if continue_reply_buff is not None:
+        if isinstance(model, OffPolicyAlgorithm):
+            model.load_replay_buffer(continue_reply_buff)
+        else:
+            warnings.warn("非 Off policy 策略, 忽略 reply buff 参数")
+
     return model
 
 def config_to_trialargs(trial_cfg: DictConfig):
@@ -192,6 +210,8 @@ def parse_exp_config(cfg: DictConfig, replace_arg_dict: Optional[Dict[str, Any]]
         warnings.warn("警告: 复制训练环境作为测试环境", UserWarning)
         eval_env = config_to_env(cfg.train_env, replace_arg_dict, exec_arg_dict)
     else:
+        if cfg.eval_env.get("is_base_on_train", False):
+            cfg.eval_env = OmegaConf.merge(cfg.train_env, cfg.eval_env)
         eval_env = config_to_env(cfg.eval_env, replace_arg_dict, exec_arg_dict)
 
     return ObjectiveArgs(model, train_env, eval_env, trial_args) # type: ignore
@@ -262,9 +282,12 @@ class ExpManager:
         * `model` 模型
             * `type` 模型类型
             * `kwargs` 模型参数
-        * `eval_env` 测试环境 (可选)
+            * `continue_weight_path` 初始化模型参数 (可选)
+            * `continue_reply_buff` 初始化模型回放队列 (可选)
+        * `eval_env` 测试环境 (可选, 默认复制训练环境配置)
             * `type` 环境类型
             * `kwargs` 环境参数
+            * `is_base_on_train` 以训练环境配置为基础 (可选, 默认为 False)
             * `wrapper` 环境包裹器 (可选)
         * `trial` 训练参数
             * 参见类 `TrialArgs`
@@ -397,11 +420,17 @@ class ExpManager:
             fps = objective_data.trial_args.tb_fps,
             tb_record_last_only = objective_data.trial_args.tb_record_last_only,
 
+            # tb_log_critic_loss_name = objective_data.trial_args.tb_log_critic_loss_name,
+            # tb_log_actor_loss_name = objective_data.trial_args.tb_log_actor_loss_name,
+            tb_rollout_log_record_dict = objective_data.trial_args.tb_rollout_log_record_dict,
+
             num_record_episodes = objective_data.trial_args.tb_record_episodes,
             deterministic = objective_data.trial_args.eval_deterministic,
 
             save_root = object_root.as_posix(),
-            save_model = self.opt_save_model,
+            save_best_model = self.opt_save_model,
+            save_last_model = self.opt_save_model,
+            save_replay_buff = False,
             save_data = self.opt_save_data,
         )
         if self.opt_record_train_return:
@@ -438,21 +467,22 @@ class ExpManager:
         )
 
 def train_model(
-        exp_conf: Union[str, Path, DictConfig],
-        exp_root: Union[Path, str] = "runs",
+    exp_conf: Union[str, Path, DictConfig],
+    exp_root: Union[Path, str] = "runs",
 
-        verbose: Optional[int] = None,
-        add_time_stamp: bool = True,
+    verbose: Optional[int] = None,
+    add_time_stamp: bool = True,
 
-        opt_save_opt: bool = True,
-        opt_save_data: bool = True,
-        opt_record_train_return: bool = True,
+    opt_save_opt: bool = True,
+    opt_save_data: bool = True,
+    opt_save_buff: bool = True,
+    opt_record_train_return: bool = True,
 
-        exp_replace_arg_dict: Optional[Dict[str, Any]] = None,
-        exp_exec_arg_dict: Optional[Dict[str, Callable[[Any], Any]]] = None,
+    exp_replace_arg_dict: Optional[Dict[str, Any]] = None,
+    exp_exec_arg_dict: Optional[Dict[str, Callable[[Any], Any]]] = None,
 
-        trial_time_ratio: Optional[float] = None
-    ) -> None:
+    trial_time_ratio: Optional[float] = None
+) -> None:
 
     exp_root = Path(exp_root)
     if add_time_stamp:
@@ -491,12 +521,17 @@ def train_model(
         tb_record_flag = objective_data.trial_args.tb_record_flag,
         fps = objective_data.trial_args.tb_fps,
         tb_record_last_only = False,
+        # tb_log_critic_loss_name = objective_data.trial_args.tb_log_critic_loss_name,
+        # tb_log_actor_loss_name = objective_data.trial_args.tb_log_actor_loss_name,
+        tb_rollout_log_record_dict = objective_data.trial_args.tb_rollout_log_record_dict,
 
         num_record_episodes = objective_data.trial_args.tb_record_episodes,
         deterministic = objective_data.trial_args.eval_deterministic,
 
         save_root = exp_root,
-        save_model = True,
+        save_best_model = True,
+        save_last_model = True,
+        save_replay_buff = opt_save_buff,
         save_data = opt_save_data,
     )
     if opt_record_train_return:
@@ -510,3 +545,63 @@ def train_model(
     objective_data.model.learn(
         objective_data.trial_args.total_timesteps, use_callback, progress_bar = True
     )
+
+def continue_train_model(
+    exp_conf_path: Path,
+
+    opt_save_data: bool = True,
+    opt_record_train_return: bool = True,
+
+    exp_replace_arg_dict: Optional[Dict[str, Any]] = None,
+    exp_exec_arg_dict: Optional[Dict[str, Callable[[Any], Any]]] = None,
+):
+    exp_root = exp_conf_path.parent
+    exp_conf = load_exp_config(exp_conf_path, is_resolve = True)
+    # 设置随机种子
+    set_random_seed(int(exp_conf.trial.meta_manual_seed), True)
+    # 创建实验所需的环境与模型
+    objective_data = parse_exp_config(exp_conf, exp_replace_arg_dict, exp_exec_arg_dict)
+
+    model_path = exp_root.joinpath("best_model")
+    
+    if model_path.exists():
+        objective_data.model = objective_data.model.load(model_path, objective_data.eval_env)
+    else:
+        raise Exception("没有找到模型")
+    if isinstance(objective_data.model, OffPolicyAlgorithm):
+        buff_path = exp_root.joinpath("replay_buff")
+        if buff_path.exists():
+            objective_data.model.load_replay_buffer(buff_path)
+        else:
+            warnings.warn("没有找到回放队列, 从空的回放队列开始重新训练")
+
+    learn_callback = TensorboardEvalCallback(
+        tb_writer = None,
+
+        eval_freq = objective_data.trial_args.eval_freq,
+        eval_env = objective_data.eval_env,
+        n_eval_episodes = objective_data.trial_args.eval_num_episodes,
+
+        tb_record_flag = objective_data.trial_args.tb_record_flag,
+        fps = objective_data.trial_args.tb_fps,
+        tb_record_last_only = False,
+
+        num_record_episodes = objective_data.trial_args.tb_record_episodes,
+        deterministic = objective_data.trial_args.eval_deterministic,
+
+        save_root = exp_root,
+        save_best_model = True,
+        save_data = opt_save_data,
+    )
+    if opt_record_train_return:
+        use_callback = CallbackList([
+            learn_callback,
+            TensorboardEpReturnCallback(learn_callback.tb_writer)
+        ])
+    else:
+        use_callback = learn_callback
+
+    objective_data.model.learn(
+        objective_data.trial_args.total_timesteps, use_callback, progress_bar = True
+    )
+    pass

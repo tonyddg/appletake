@@ -12,6 +12,7 @@ from torch.utils.tensorboard.writer import SummaryWriter
 import torch
 
 from matplotlib import pyplot as plt
+from matplotlib.axes import Axes
 
 from ..utility import get_file_time_str
 from ..analysis_log import TickAnalysis
@@ -29,14 +30,16 @@ class RecordFlag(Flag):
     CRITIC = auto()
 
     SUCCESS = auto()
+    # 提供相关回调函数参数后自动开启
+    CUSTOM = auto()
 
     ALL = VEDIO | REWARD | CRITIC | SUCCESS
 
     NORMAL = VEDIO | REWARD | SUCCESS
 
 class RecordBuf:
-    def __init__(self, num_envs: int, record_flag: RecordFlag, test_flag: RecordFlag):
-        if test_flag & record_flag:
+    def __init__(self, num_envs: int, record_flag: Optional[RecordFlag], test_flag: Optional[RecordFlag]):
+        if (record_flag is None or test_flag is None) or (test_flag & record_flag):
             self.venv_buf = [[] for _ in range(num_envs)]
             self._is_available = True
         else:
@@ -67,13 +70,17 @@ def eval_record(
     model: "type_aliases.PolicyPredictor",
     env: Union[VecEnv, VecEnvWrapper],
 
-    vedio_record_callback: Callable[[int, Optional[List[np.ndarray]], Optional[np.ndarray], Optional[np.ndarray]], None],
+    vedio_record_callback: Callable[[int, Optional[List[np.ndarray]], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]], None],
     num_record_episodes: Optional[int] = None,
     record_flag: RecordFlag = RecordFlag.ALL,
 
     verbose: int = 0,
     n_eval_episodes: int = 10,
     deterministic: bool = True,
+
+    # fun(i, _local, _global) -> np.ndarray
+    custom_record_callback: Optional[Callable[[int, Dict, Dict], np.ndarray]] = None,
+    addition_callback: Optional[Callable[[Dict, Dict], None]] = None,
     **kwargs
 ):
     '''
@@ -93,9 +100,17 @@ def eval_record(
         warnings.warn("给定的模型不支持获取 Critic", UserWarning)
         record_flag = record_flag & (~RecordFlag.CRITIC)
 
+    if RecordFlag.CUSTOM in record_flag and custom_record_callback is None:
+        warnings.warn("没有提供自定义记录回调参数 custom_record_callback", UserWarning)
+        record_flag = record_flag & (~RecordFlag.CUSTOM)
+    # 如果提供了回调函数自动开启
+    if custom_record_callback is not None:
+        record_flag = record_flag | (RecordFlag.CUSTOM)
+
     vedio_buf = RecordBuf(num_envs, RecordFlag.VEDIO, record_flag)
     reward_buf = RecordBuf(num_envs, RecordFlag.REWARD, record_flag)
     critic_buf = RecordBuf(num_envs, RecordFlag.CRITIC, record_flag)
+    custom_buf = RecordBuf(num_envs, RecordFlag.CUSTOM, record_flag)
 
     if num_record_episodes == None:
         num_record_episodes = n_eval_episodes
@@ -142,6 +157,9 @@ def eval_record(
                 reward_buf.append(i, _locals["reward"])
             if critic_buf.is_available():
                 critic_buf.append(i, get_critic(model, _locals["observations"][i])) # type: ignore
+            if custom_buf.is_available():
+                if custom_record_callback is not None:
+                    custom_buf.append(i, custom_record_callback(i, _locals, _globals))
 
             if done:
                 vedio_record_callback(
@@ -149,12 +167,16 @@ def eval_record(
                     vedio_buf.get_res(i), #type:ignore 
                     reward_buf.get_res(i), #type:ignore 
                     critic_buf.get_res(i), #type:ignore
+                    custom_buf.get_res(i), #type:ignore
                 )
 
                 num_episode += 1
 
                 if pbar != None:
                     pbar.update()
+
+        if addition_callback is not None:
+            addition_callback(_locals, _globals)
 
     eval_res = evaluate_policy(model, env, n_eval_episodes, deterministic, callback = eval_record_callback, **kwargs)
     
@@ -181,12 +203,18 @@ def eval_record_to_tensorbard(
     verbose: int = 0,
     n_eval_episodes: int = 10,
     deterministic: bool = True,
+
+    custom_record_callback: Optional[Callable[[int, Dict, Dict], np.ndarray]] = None,
+    # fun(num_ep, custom_list, tb_writer)
+    custom_tb_callback: Optional[Callable[[int, np.ndarray, SummaryWriter], None]] = None,
+    addition_callback: Optional[Callable[[Dict, Dict], None]] = None,
+
     **kwargs
 ):
     '''
     将过程记录为 Tensorboard 视频
     '''
-    def tb_callback(num_ep, vedio, reward_list, critic_list):
+    def tb_callback(num_ep, vedio, reward_list, critic_list, custom_list):
         if vedio is not None:
             tb_writer.add_video(
                 root_tag + "/episode_" + str(num_ep) + "/vedio", 
@@ -214,8 +242,11 @@ def eval_record_to_tensorbard(
             for ep, ep_critic in enumerate(critic_list):
                 tb_writer.add_scalar(critic_tag, ep_critic, ep)
 
+        if custom_list is not None and custom_tb_callback is not None:
+            custom_tb_callback(num_ep, custom_list, tb_writer)
+
     return eval_record(
-        model, env, tb_callback, num_record_episodes, record_flag, verbose, n_eval_episodes, deterministic, **kwargs
+        model, env, tb_callback, num_record_episodes, record_flag, verbose, n_eval_episodes, deterministic, custom_record_callback = custom_record_callback, addition_callback = addition_callback, **kwargs
     )
 
 def eval_record_to_file(
@@ -235,6 +266,11 @@ def eval_record_to_file(
     verbose: int = 0,
     n_eval_episodes: int = 10,
     deterministic: bool = True,
+
+    custom_record_callback: Optional[Callable[[int, Dict, Dict], np.ndarray]] = None,
+    custom_axe_callback: Optional[Callable[[int, np.ndarray, Axes], None]] = None,
+    addition_callback: Optional[Callable[[Dict, Dict], None]] = None,
+    
     **kwargs
 ):
     '''
@@ -256,13 +292,15 @@ def eval_record_to_file(
     
     if not save_root.exists():
         os.makedirs(save_root)
-    vedio_name_pattern = save_root.joinpath("{}.gif").as_posix()
-    plot_name_pattern = save_root.joinpath("{}.png").as_posix()
+    vedio_name_pattern = save_root.joinpath("vedio_{}.gif").as_posix()
+    reward_plot_name_pattern = save_root.joinpath("reward_{}.png").as_posix()
+    custom_plot_name_pattern = save_root.joinpath("custom_{}.png").as_posix()
 
     reward_buf = []
     critic_buf = []
+    custom_buf = []
 
-    def tb_callback(num_ep, vedio, reward_list, critic_list):
+    def tb_callback(num_ep, vedio, reward_list, critic_list, custom_list):
         if vedio is not None:
             # 拆分为 List
             clip = ImageSequenceClip(sequence = [(img_slice * 255).astype(np.uint8) for img_slice in vedio], fps = fps)
@@ -285,15 +323,25 @@ def eval_record_to_file(
                 axe.set_xlabel("Time Step")
                 axe.set_ylabel("Return")
                 axe.set_title(f"Eval {num_ep} return-time")
-                fig.savefig(plot_name_pattern.format(num_ep))
+                fig.savefig(reward_plot_name_pattern.format(num_ep))
 
                 plt.close(fig)
 
         if critic_list is not None:
-            critic_buf.append(critic_buf)
+            critic_buf.append(np.asarray(critic_list))
+
+        if custom_list is not None:
+            if is_save_return_plot and custom_axe_callback is not None:
+                fig, axe = plt.subplots()
+                custom_axe_callback(num_ep, np.asarray(custom_list), axe)
+                fig.savefig(custom_plot_name_pattern.format(num_ep))
+
+                plt.close(fig)
+
+            custom_buf.append(np.asarray(custom_list))
 
     origin_res, success_rate = eval_record(
-        model, env, tb_callback, num_record_episodes, record_flag, verbose, n_eval_episodes, deterministic, return_episode_rewards = True, **kwargs
+        model, env, tb_callback, num_record_episodes, record_flag, verbose, n_eval_episodes, deterministic, addition_callback = addition_callback, custom_record_callback = custom_record_callback, return_episode_rewards = True, **kwargs
     )
 
     assert isinstance(origin_res[0], list) and isinstance(origin_res[1], list), "保证参数 return_episode_rewards 为 True"
@@ -314,6 +362,13 @@ def eval_record_to_file(
                 *critic_buf
             )
 
+    if len(custom_buf) > 0:
+        with open(save_root.joinpath("custom.npz"), 'wb') as f:
+            np.savez(
+                f, 
+                *custom_buf
+            )
+
     if is_save_return_plot:
 
         fig, axe = plt.subplots()
@@ -324,8 +379,8 @@ def eval_record_to_file(
             title_str += f"sr: {success_rate:.3f}"
 
         axe.set_title(title_str)
-        fig.savefig(plot_name_pattern.format("summary"))
+        fig.savefig(reward_plot_name_pattern.format("summary"))
 
         plt.close(fig)
 
-    return origin_res
+    return origin_res, save_root
