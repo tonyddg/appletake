@@ -70,7 +70,8 @@ class NetFeatObsWrapper(ObservationWrapper):
         不支持 Tuple 观测
         '''
         obs_th = obs_as_tensor(obs, self.device) # type: ignore
-        feat = self.net.forward(obs_th).detach().cpu().numpy()
+        with torch.no_grad():
+            feat = self.net.forward(obs_th).detach().cpu().numpy()
 
         return feat
 
