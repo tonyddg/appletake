@@ -1,0 +1,109 @@
+train_env:
+  type: 'src.gym_env.plane_box.make_vec_env:make_plane_box_vec_env'
+  kwargs:
+    env_type: "corner"
+    scene_file: "scene/plane_box/base_vec6.ttt"
+    num_envs: 4
+    kwargs:
+      subenv_mid_name : "#"
+      subenv_range: [0, 6]
+
+      obs_trans: "@ext_trans"
+      obs_source: "depth"
+
+      env_init_box_pos_range: [
+          [-25, -25, -10, -1, -1, -5],
+          [25, 25, 10, 1, 1, 5]
+      ]
+      env_init_vis_pos_range: [
+          [-2, -2, -2, -1, -1, -1],
+          [2, 2, 2, 1, 1, 1]
+      ]
+      env_action_noise: [
+        0.5, 0.5, 0.5, 0.1, 0.1, 0.1
+      ]
+      env_vis_persp_deg_disturb: 2
+      env_movbox_size_range: [
+        [0.12, 0.12, 0.12],
+        [0.30, 0.30, 0.20]
+      ]
+
+      env_movebox_center_err: [
+          [-25, -25, -10, -1, -1, -5],
+          [25, 25, 10, 1, 1, 5]
+      ]
+
+      env_is_unlimit_time: True
+      env_max_step: 20
+      "@env_reward_fn": 
+        type: "reward_passive_fn"
+        kwargs:
+          align_fail_panelty: -0.2
+          timeout_panelty: 0
+
+          max_align_pos_dis_mm: 8
+          max_align_rot_dis_deg: 2
+
+          max_approach_pos_dis_mm: 40
+          max_approach_rot_dis_deg: 8 
+
+          max_move_pos_dis_mm: 10
+          max_move_rot_dis_deg: 5
+
+          is_attract_to_center: true
+
+          max_align_reward: 4
+          max_approach_reward: 0
+          max_move_reward: 0.2
+
+      act_unit: [5, 5, 5, 1, 1, 1]
+      act_type: "DESICION_HPPO"
+
+      env_tolerance_offset: 0.005 # 0.010
+      env_align_deg_check: 5
+      env_random_sigma: ~
+
+      corner_plane_height_offset_range: [-0.04, 0.36]
+
+  wrapper: 
+    -
+      type: 'src.sb3.vec_wrap:NetFeatObsWrapper'
+      kwargs:
+        "@net": 
+          type: "make_effv1_backbone"
+          kwargs:
+            path: "model/plane_box/ext/corner/best.pth"
+        feat_dim: 1280
+
+eval_env:
+  is_base_on_train: True
+  kwargs:
+    num_envs: 1
+
+model:
+  type: src.hppo.hppo:HybridPPO
+  kwargs:
+    policy: MlpPolicy
+    gamma: 0.9
+    n_steps: 60
+    batch_size: 60
+    policy_kwargs:
+      net_arch: 
+        pi: [512]
+        vf: [512]
+
+trial:
+  total_timesteps: 2000000 # 1000000
+  meta_manual_seed: 0
+  meta_exp_root: runs/plane_box/finetuning/three_finetuning/ppo_ext
+  meta_exp_name: trial
+  eval_freq: 50000
+  eval_num_episodes: 100
+  eval_pruner_warmup_ratio: 0.4
+  tb_record_episodes: 5
+  tb_record_flag: ALL
+  tb_record_last_only: true
+  meta_object_path: runs/plane_box/finetuning/three_finetuning/ppo_ext
+
+  tb_log_critic_loss_name: train/value_loss
+  tb_log_actor_loss_name: train/loss

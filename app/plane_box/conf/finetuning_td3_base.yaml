@@ -1,0 +1,46 @@
+model:
+  type: 'stable_baselines3:TD3'
+  kwargs:
+    policy: "MlpPolicy"
+    policy_kwargs: 
+      net_arch: "${sample.net_arch}"
+
+    batch_size: "${sample.batch_size}"
+    # "@learning_rate":
+    #   type: "maintain_cosine_lr"
+    #   kwargs: 
+    #     lr: "${sample.learning_rate}"
+    #     maintain_ratio: 0.3
+    #     adjust_ratio: 0.9
+    #     eta_min_rate: 1e-2
+    "learning_rate": "${sample.learning_rate}"
+    buffer_size: "${sample.buffer_size}"
+    learning_starts: "${sample.learning_starts}"
+
+    train_freq: 1
+    gradient_steps: "${sample.gradient_steps}"
+
+    gamma: "${sample.gamma}"
+    tau: "${sample.tau}"
+
+    "@action_noise":
+      type: "decision_normal_noise"
+      kwargs: 
+        pos_sigma: "${sample.pos_sigma}"
+        rot_sigma: "${sample.rot_sigma}"
+        des_sigma: "${sample.des_sigma}"
+
+trial:
+  total_timesteps: 30000
+
+  meta_manual_seed: 0
+  meta_exp_root: "runs/plane_box/corner_finetuning/ext_td3"
+  meta_exp_name: "trial"
+
+  eval_freq: 3000
+  eval_num_episodes: 100
+  eval_pruner_warmup_ratio: 0.4
+
+  tb_record_episodes: 5
+  tb_record_flag: 'ALL'
+  tb_record_last_only: True

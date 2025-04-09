@@ -1,0 +1,24 @@
+train_env:
+  type: 'src.gym_env.plane_box.three:ThreeEnv'
+  kwargs:
+    three_fixbox_size_range:
+      - [0.12, 0.12, 0.12]
+      - [0.30, 0.30, 0.20]
+
+    three_extra_fixbox_prob: 0.5
+    three_size_disturb_range: [0.00, 0.030]
+    three_box_gap_range: [0, 0.010]
+    three_is_zero_middle: false
+
+  wrapper:
+    -
+      type: 'src.sb3.vec_wrap:NetFeatObsWrapper'
+      kwargs:
+        "@net": 
+          type: "make_effv1_backbone"
+          kwargs:
+            path: "model/plane_box/ext/three/best.pth"
+        feat_dim: 1280
+
+eval_env:
+  is_base_on_train: True

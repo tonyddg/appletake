@@ -1,0 +1,11 @@
+train_env:
+  type: 'src.gym_env.plane_box.corner:CornerEnv'
+  kwargs:
+    corner_plane_height_offset_range: [-0.04, 0.36]
+    obs_trans: "@train_trans_corner"
+
+  wrapper: ~
+
+eval_env:
+  kwargs:
+    obs_trans: "@ext_trans_corner"
