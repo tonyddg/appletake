@@ -27,7 +27,12 @@ if __name__ == "__main__":
     env_type = "three"
     cnf_vary = "train"
     obs_type = "train"
-    phase_type = "default"
+    phase_type = "singleview"
+    # custom_conf = {
+    #     "train_env": {"kwargs": {"dataset_is_center_goal": True}}
+    # }
+    custom_conf = {}
+    is_sample_train = True
 
     cls_dict = {
         "three": ThreeEnv,
@@ -43,7 +48,8 @@ if __name__ == "__main__":
     cfg = load_exp_config(
         f"app/plane_box/conf/base_{cnf_vary}_env.yaml",
         f"app/plane_box/conf/{env_type}_{obs_type}_env_{phase_type}.yaml",
-        is_resolve = True
+        is_resolve = True,
+        merge_dict = custom_conf
     )
     if cfg.eval_env.get("is_base_on_train", False):
         cfg.eval_env = OmegaConf.merge(cfg.train_env, cfg.eval_env)
@@ -54,8 +60,13 @@ if __name__ == "__main__":
     cfg = config_data_replace(cfg, exp_replace_arg_dict())
     cfg = config_data_exec(cfg, exp_exec_arg_dict())
 
-    train_env_kwargs = cfg["train_env"]["kwargs"] # type: ignore
-    eval_env_kwargs = cfg["eval_env"]["kwargs"] # type: ignore
+    if is_sample_train:
+        train_env_kwargs = cfg["train_env"]["kwargs"] # type: ignore
+    else:
+        train_env_kwargs = cfg["eval_env"]["kwargs"] # type: ignore
+
+    # train_env_kwargs = cfg["train_env"]["kwargs"] # type: ignore
+    # eval_env_kwargs = cfg["eval_env"]["kwargs"] # type: ignore
 
     train_dataset = PrEnvRenderDataset(
         cls_dict[env_type], "scene/plane_box/base_vec6.ttt", train_env_kwargs, num_epoch_data = 51200 # type: ignore

@@ -5,7 +5,7 @@ from typing import Optional
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.sb3.exp_manager import train_model, load_exp_config
+from src.sb3.exp_manager import train_model, load_exp_config, continue_train_model
 from src.pr.safe_pyrep import SafePyRep, PyRep
 from conf.arg_dict import exp_replace_arg_dict, exp_exec_arg_dict
 
@@ -17,6 +17,7 @@ if __name__ == "__main__":
     parser.add_argument("--phase_type", default = "default", nargs = "?")
     parser.add_argument("--is_use_cfg_only", action = "store_true")
     parser.add_argument("--not_need_pr", action = "store_true")
+    parser.add_argument("--is_continue_train", action = "store_true")
     parser.add_argument("tuned_cfg")
     res = parser.parse_args()
     print(res)
@@ -27,6 +28,7 @@ if __name__ == "__main__":
     tuned_cfg = res.tuned_cfg
     is_use_cfg_only = res.is_use_cfg_only
     not_need_pr = res.not_need_pr
+    is_continue_train = res.is_continue_train
 
     if is_use_cfg_only:
         cfg = load_exp_config(
@@ -49,14 +51,22 @@ if __name__ == "__main__":
         else:
             addition_dict = {}
 
-        train_model(
-            cfg,
-            verbose = 1,
-            exp_root = f"runs/plane_box/ply/{env_type}_{obs_type}_{phase_type}",
-            exp_replace_arg_dict = exp_replace_arg_dict(addition_dict),
-            exp_exec_arg_dict = exp_exec_arg_dict(),
-            trial_time_ratio = None
-        )
+        if is_continue_train:
+            continue_train_model(
+                tuned_cfg,
+                exp_replace_arg_dict = exp_replace_arg_dict(addition_dict),
+                exp_exec_arg_dict = exp_exec_arg_dict(),
+            )
+            
+        else:
+            train_model(
+                cfg,
+                verbose = 1,
+                exp_root = f"runs/plane_box/ply/{env_type}_{obs_type}_{phase_type}",
+                exp_replace_arg_dict = exp_replace_arg_dict(addition_dict),
+                exp_exec_arg_dict = exp_exec_arg_dict(),
+                trial_time_ratio = None
+            )
 
     if not_need_pr:
         train(None)

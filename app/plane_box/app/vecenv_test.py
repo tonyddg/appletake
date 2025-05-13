@@ -27,9 +27,9 @@ import time
 if __name__ == "__main__":
 
     ENV_TYPE = "three"
-    CNF_VARY = "normal"
-    OBS_TYPE = "ext"
-    PAHASE_TYPE = "test"
+    CNF_VARY = "train"
+    OBS_TYPE = "train"
+    PAHASE_TYPE = "singleview"
 
     with SafePyRep(f"scene/plane_box/base_vec6.ttt", False) as pr:
 
@@ -44,7 +44,7 @@ if __name__ == "__main__":
         #     is_resolve = True)
 
         # env_conf.train_env.kwargs.env_action_noise = None
-        env_conf.train_env.kwargs.subenv_range = [0, 4]
+        env_conf.train_env.kwargs.subenv_range = [0, 6]
         # env_conf.train_env.kwargs.act_is_standard_parameter_space = True
         # env_conf.train_env.kwargs.env_tolerance_offset = 0.005
 

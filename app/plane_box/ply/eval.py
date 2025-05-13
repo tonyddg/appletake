@@ -5,7 +5,7 @@ import sys
 import numpy as np
 from omegaconf import OmegaConf
 import torch
-
+import ast
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -28,16 +28,19 @@ from src.hppo.utility import seperate_action_from_numpy
 from src.hppo.hppo import HybridPPO
 from src.hppo.hybrid_policy import HybridActorCriticPolicy
 
+act_unit = np.array([5, 5, 5, 1, 1, 1])
+
 def passive_act_decorater(act: np.ndarray):
-    deg_diff, _ = rot_to_rotvec(act[3:])
-    pos_diff = np.linalg.norm(act[:3])
+    deg_norm, _ = rot_to_rotvec(act[3:])
+    pos_norm = np.linalg.norm(act[:3])
 
     # print(f"deg_diff: {deg_diff}, pos_diff: {pos_diff}")
 
-    if deg_diff < 1 and pos_diff < 1:
+    if deg_norm < 1.5 and pos_norm < 1.5:
         act = np.hstack([act, [0, 1]], dtype = np.float32)
     else:
         act = np.hstack([act, [1, 0]], dtype = np.float32)
+        act[:6] = np.clip(act[:6], -act_unit, act_unit)
     act = np.hstack([act, [1, 0]], dtype = np.float32)
     return act
 
@@ -63,6 +66,11 @@ with SafePyRep("scene/plane_box/base_vec6.ttt", True) as pr:
     # parser.add_argument("--is_parameter_space", action = "store_true")
     parser.add_argument("--phase_type", default = "default", nargs = "?")
     parser.add_argument("--act_type", default = "DESICION_PDDPG", type = PlaneBoxEnvActionType, nargs = "?")
+    parser.add_argument("--is_parameter_space", action = "store_true")
+    parser.add_argument("--custom_conf", default = "{}", type = str)
+    
+    parser.add_argument("--in_channel", default = 3, type = int)
+    
     parser.add_argument("model_path")
     res = parser.parse_args()
     print(f"receive arguments: {res}")
@@ -76,11 +84,15 @@ with SafePyRep("scene/plane_box/base_vec6.ttt", True) as pr:
     # is_parameter_space = res.is_parameter_space
     phase_type = res.phase_type
     act_type = PlaneBoxEnvActionType(res.act_type)
+    custom_conf = dict(ast.literal_eval(res.custom_conf))
+
+    in_channel = res.in_channel
 
     cfg = load_exp_config(
         f"app/plane_box/conf/base_eval_env.yaml",
         f"app/plane_box/conf/{env_type}_{obs_type}_env_{phase_type}.yaml",
-        is_resolve = True
+        is_resolve = True,
+        merge_dict = custom_conf
     )
     if cfg.eval_env.get("is_base_on_train", False):
         cfg.eval_env = OmegaConf.merge(cfg.train_env, cfg.eval_env)
@@ -101,13 +113,13 @@ with SafePyRep("scene/plane_box/base_vec6.ttt", True) as pr:
         if alg_type == "eff":
             net = BackboneWithHead(
                 EfficientNetV1Backbone(
-                    3, 1, 1, 0.2
+                    in_channel, 1, 1, 0.2
                 ), 6, 0.2
             )
         elif alg_type == "ftb":
             net = BackboneWithHead(
                 SeperateLateFuseNet(
-                    3, lambda: EfficientNetV1Backbone(1, 1, 1, 0.2)
+                    in_channel, lambda: EfficientNetV1Backbone(1, 1, 1, 0.2)
                 ), 6, 0.2
             )
         else:

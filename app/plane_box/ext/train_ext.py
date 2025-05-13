@@ -1,3 +1,4 @@
+import ast
 import os
 import sys
 from typing import Dict
@@ -31,29 +32,51 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(prog = None, description = None, epilog = None)
     parser.add_argument("--env_type", default = "three", choices = ["three", "paralle", "corner"], nargs = "?")
+    parser.add_argument("--env_vary", default = "train", type = str, nargs = "?")
+    
     parser.add_argument("--net_type", default = "eff", choices = ["eff", "ftb", "eff_b2"], nargs = "?")
     parser.add_argument("--lr_schedule", default = "warmup", choices = ["warmup", "restart", "constant"], nargs = "?")
-    parser.add_argument("--num_worker", default = 3, type = int, nargs = "?")
+    
+    parser.add_argument("--num_worker_train", default = 3, type = int, nargs = "?")
+    parser.add_argument("--num_worker_eval", default = 3, type = int, nargs = "?")
+    
     parser.add_argument("--batch_size", default = 64, type = int, nargs = "?")
-    parser.add_argument("--lr", default = 1e-3, type = float, nargs = "?")
+    parser.add_argument("--lr", default = 1e-2, type = float, nargs = "?")
     parser.add_argument("--weight_decay", default = 5e-6, type = float, nargs = "?")
+    parser.add_argument("--eta_min_rate", default = 1e-3, type = float, nargs = "?")
     parser.add_argument("--epoch_scale", default = 1, type = float, nargs = "?")
     parser.add_argument("--init_weight", default = True, nargs = "?")
     parser.add_argument("--phase_type", default = "default", nargs = "?")
+    parser.add_argument("--custom_conf", default = "{}", type = str)
+    parser.add_argument("--suffix_name", default = "ext", type = str)
+
+    parser.add_argument("--in_channel", default = 3, type = int, nargs = "?")
+
     res = parser.parse_args()
 
     replace_arg_dict = exp_replace_arg_dict()
     env_type = res.env_type
+    env_vary = res.env_vary
+
     net_type = res.net_type
     lr_schedule = res.lr_schedule
-    num_worker = res.num_worker
+
+    # num_worker = res.num_worker
+    num_worker_train = res.num_worker_train
+    num_worker_eval = res.num_worker_eval
+
     batch_size = res.batch_size
     init_weight = res.init_weight
     phase_type = res.phase_type
+    eta_min_rate = res.eta_min_rate
+    custom_conf = dict(ast.literal_eval(res.custom_conf))
+    suffix_name = res.suffix_name
 
     lr = res.lr
     weight_decay = res.weight_decay
     epoch_scale = res.epoch_scale
+
+    in_channel = res.in_channel
 
     print(res)
 
@@ -63,14 +86,15 @@ if __name__ == "__main__":
         "paralle": ParalleEnv
     }
 
-    train_cfg_path = "app/plane_box/conf/base_train_env.yaml"
+    train_cfg_path = f"app/plane_box/conf/base_{env_vary}_env.yaml"
     if net_type == "eff_b2":
         train_cfg_path = "app/plane_box/conf/base_train_b2_env.yaml"
 
     cfg = load_exp_config(
         train_cfg_path,
         f"app/plane_box/conf/{env_type}_train_env_{phase_type}.yaml",
-        is_resolve = True
+        is_resolve = True,
+        merge_dict = custom_conf
     )
     if cfg.eval_env.get("is_base_on_train", False):
         cfg.eval_env = OmegaConf.merge(cfg.train_env, cfg.eval_env)
@@ -86,16 +110,16 @@ if __name__ == "__main__":
     train_dataset = PrEnvRenderDataset(
         cls_dict[env_type], "scene/plane_box/base_vec6.ttt", train_env_kwargs, num_epoch_data = 51200
     )
-    train_dl = DataLoader(train_dataset, batch_size, num_workers = num_worker)
+    train_dl = DataLoader(train_dataset, batch_size, num_workers = num_worker_train)
 
     test_dataset = PrEnvRenderDataset(
-        cls_dict[env_type], "scene/plane_box/base_vec6.ttt", eval_env_kwargs, num_epoch_data = 10240
+        cls_dict[env_type], "scene/plane_box/base_vec6.ttt", eval_env_kwargs, num_epoch_data = 5120
     )
-    test_dl = DataLoader(test_dataset, batch_size, num_workers = num_worker)
+    test_dl = DataLoader(test_dataset, batch_size, num_workers = num_worker_eval)
 
-    in_channel = 3
-    if env_type == "corner":
-        in_channel = 1
+    # in_channel = 3
+    # if env_type == "corner":
+    #     in_channel = 1
 
     match net_type:
         case "eff":
@@ -127,9 +151,10 @@ if __name__ == "__main__":
                 weight_decay = weight_decay,
                 schedule_type = "warm_cos",
                 schedule_kwargs = {
-                    "warmup_epoch": int(10 * epoch_scale), 
+                    # 论文 https://arxiv.org/pdf/1812.01187
+                    "warmup_epoch": 5, 
                     "T_max": int(50 * epoch_scale), 
-                    "eta_min_rate": 1e-2
+                    "eta_min_rate": eta_min_rate
                 },
                 is_use_adam = True
             )
@@ -141,7 +166,7 @@ if __name__ == "__main__":
                 schedule_kwargs = {
                     "T_0": int(10 * epoch_scale), 
                     "T_mult": 2, 
-                    "eta_min": 1e-2
+                    "eta_min": eta_min_rate
                 },
                 is_use_adam = True
             )
@@ -163,7 +188,7 @@ if __name__ == "__main__":
         lr, 
         train_dl, 
         test_dl, 
-        f"./runs/plane_box/ext/{env_type}_{net_type}_{lr_schedule}_{lr:.0e}_ext", 
+        f"./runs/plane_box/ext/{env_type}_{net_type}_{lr_schedule}_{lr:.0e}_{suffix_name}", 
         nn.SmoothL1Loss,
         reg_mse_success_fn, 
         advance_config = cfg,
