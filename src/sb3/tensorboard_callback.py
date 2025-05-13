@@ -46,7 +46,7 @@ class TensorboardEvalCallback(BaseCallback):
             save_last_model: bool = True,
             save_best_model: bool = True,
             save_replay_buff: bool = True,
-            save_data: bool = True,
+            save_data: Optional[Union[str, Path]] = "data.npz",
             save_root: Optional[Union[str, Path]] = None,
 
             num_record_episodes: Optional[int] = 2,
@@ -120,7 +120,7 @@ class TensorboardEvalCallback(BaseCallback):
             self.save_last_model = False
             self.save_best_model = False
             self.save_replay_buff = False
-            self.save_data = False
+            self.save_data = None
 
         if self.save_best_model:
             self.best_model_save_path = self.save_root.joinpath("best_model")
@@ -133,8 +133,8 @@ class TensorboardEvalCallback(BaseCallback):
             # else:
             #     warnings.warn("非 Off Policy 策略没有回放队列")
             #     self.save_replay_buff = False
-        if self.save_data:
-            self.data_save_path = self.save_root.joinpath("data.npz")
+        if self.save_data is not None:
+            self.data_save_path = self.save_root.joinpath(self.save_data)
             self.episode_return_hist_buf = []
             self.episode_length_hist_buf = []
 
@@ -241,7 +241,7 @@ class TensorboardEvalCallback(BaseCallback):
                 warnings.warn("非 Off Policy 策略没有回放队列")
                 self.save_replay_buff = False
 
-        if self.save_data:
+        if self.save_data is not None:
             self.episode_return_hist_buf.append(episode_return_list)
             self.episode_length_hist_buf.append(episode_length_list)
 
@@ -361,7 +361,7 @@ class OptunaEvalCallback(TensorboardEvalCallback):
         save_last_model: bool = True,
         save_best_model: bool = True,
         save_replay_buff: bool = True,
-        save_data: bool = True,
+        save_data: Optional[Union[str, Path]] = "data.npz",
         save_root: Optional[Union[str, Path]] = None,
 
         num_record_episodes: Optional[int] = 2,

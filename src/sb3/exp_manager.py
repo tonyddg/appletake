@@ -54,6 +54,8 @@ class TrialArgs:
 
     tb_record_last_only: bool = False
 
+    # tb_data_save_path: Optional[Union[Path, str]] = "data.npz"
+
     # {
     #     "critic_loss": "train/critic_loss",
     #     "actor_loss": "train/actor_loss"
@@ -264,7 +266,7 @@ class ExpManager:
 
             opt_save_conf: bool = True,
             opt_save_model: bool = False,
-            opt_save_data: bool = True,
+            opt_save_data: Optional[Union[str, Path]] = "data.npz",
 
             opt_record_train_return: bool = True,
 
@@ -474,7 +476,7 @@ def train_model(
     add_time_stamp: bool = True,
 
     opt_save_opt: bool = True,
-    opt_save_data: bool = True,
+    opt_save_data: Optional[Union[str, Path]] = "data.npz",
     opt_save_buff: bool = True,
     opt_record_train_return: bool = True,
 
@@ -547,14 +549,17 @@ def train_model(
     )
 
 def continue_train_model(
-    exp_conf_path: Path,
+    exp_conf_path: Union[str, Path],
 
-    opt_save_data: bool = True,
+    opt_save_data: Optional[Union[str, Path]] = "data.npz",
     opt_record_train_return: bool = True,
 
     exp_replace_arg_dict: Optional[Dict[str, Any]] = None,
     exp_exec_arg_dict: Optional[Dict[str, Callable[[Any], Any]]] = None,
 ):
+    if isinstance(exp_conf_path, str):
+        exp_conf_path = Path(exp_conf_path)
+
     exp_root = exp_conf_path.parent
     exp_conf = load_exp_config(exp_conf_path, is_resolve = True)
     # 设置随机种子
@@ -562,12 +567,12 @@ def continue_train_model(
     # 创建实验所需的环境与模型
     objective_data = parse_exp_config(exp_conf, exp_replace_arg_dict, exp_exec_arg_dict)
 
-    model_path = exp_root.joinpath("best_model")
+    model_path = exp_root.joinpath("last_model.zip")
     
     if model_path.exists():
         objective_data.model = objective_data.model.load(model_path, objective_data.eval_env)
     else:
-        raise Exception("没有找到模型")
+        raise Exception(f"没有找到模型 {model_path}")
     if isinstance(objective_data.model, OffPolicyAlgorithm):
         buff_path = exp_root.joinpath("replay_buff")
         if buff_path.exists():
@@ -585,6 +590,7 @@ def continue_train_model(
         tb_record_flag = objective_data.trial_args.tb_record_flag,
         fps = objective_data.trial_args.tb_fps,
         tb_record_last_only = False,
+        tb_rollout_log_record_dict = objective_data.trial_args.tb_rollout_log_record_dict,
 
         num_record_episodes = objective_data.trial_args.tb_record_episodes,
         deterministic = objective_data.trial_args.eval_deterministic,

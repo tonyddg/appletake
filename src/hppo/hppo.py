@@ -1,5 +1,5 @@
 import warnings
-from typing import Any, ClassVar, Optional, TypeVar, Union
+from typing import Any, ClassVar, List, Optional, TypeVar, Union
 
 import numpy as np
 import torch as th
@@ -386,3 +386,22 @@ class HybridPPO(HybridOnPolicyAlgorithm):
             reset_num_timesteps=reset_num_timesteps,
             progress_bar=progress_bar,
         )
+
+from .rl_cnn import (
+    RlCNN,
+)
+
+def make_cnn_hppo(channel_list: List[int], is_full_cnn: bool, features_dim: int, **kwargs):
+    origin_policy_kwargs = kwargs.get("policy_kwargs", {})
+    origin_policy_kwargs.update({
+            "features_extractor_class": RlCNN,
+            "features_extractor_kwargs": {
+                "features_dim": features_dim,
+                "channel_list": channel_list,
+                "is_full_cnn": is_full_cnn,
+    }})
+    kwargs["policy_kwargs"] = origin_policy_kwargs
+
+    return HybridPPO(
+        **kwargs,
+    )   

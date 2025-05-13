@@ -16,7 +16,7 @@ def single_pr_env_maker(scene_file: str, partial_make_fn: Callable[[PyRep], Unio
     def exit_pr(*args):
         nonlocal is_close
 
-        if is_close:
+        if is_close or not pr.running:
             return
 
         pr.stop()

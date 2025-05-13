@@ -51,7 +51,7 @@ def WarmUpCosineLR(optimizer: optim.Optimizer, warmup_epoch: int, T_max: int, et
             return epoch / warmup_epoch
         else:
             epoch -= warmup_epoch
-            return eta_min_rate + 0.5 * (1 - eta_min_rate) * (1 + math.cos((epoch / T_max) * torch.pi))
+            return eta_min_rate + 0.5 * (1 - eta_min_rate) * (1 + math.cos((epoch / T_max) * math.pi))
 
     return optim.lr_scheduler.LambdaLR(optimizer, get_init_lr_times)
 
@@ -97,6 +97,10 @@ class ModelTeacher:
             success_fn: Optional[Callable[[torch.Tensor, torch.Tensor], float]] = None,
             # 取 init_weight = True 使用 Xavier 方法初始化网络参数, 取字符串则使用加载参数
             init_weight: Union[str, bool] = False,
+
+            init_optimize: Optional[str] = None,
+            is_save_optimize: bool = True,
+
             advance_config: Optional[AdvanceConfig] = None
         ):
         
@@ -137,6 +141,9 @@ class ModelTeacher:
                 weight_decay = self.cfg.weight_decay
             )
         
+        if init_optimize is not None:
+            self.optimizer.load_state_dict(torch.load(init_optimize))
+        
         if self.cfg.schedule_type == "step":
             if self.cfg.schedule_kwargs is None:
                 self.schedule = optim.lr_scheduler.StepLR(self.optimizer, step_size = 5, gamma = 0.9)
@@ -156,6 +163,8 @@ class ModelTeacher:
                 self.schedule = WarmUpCosineLR(self.optimizer, **self.cfg.schedule_kwargs)
         else:
             self.schedule = None
+        
+        self.is_save_optimize = is_save_optimize
 
     def train_epoch(self, epoches: int):
         '''
@@ -253,6 +262,9 @@ class ModelTeacher:
                     print("Save best param")
                     self.best_res = cur_res
                     torch.save(self.net.state_dict(), self.save_dir.joinpath(f'best.pth').as_posix())
+                    
+                    if self.is_save_optimize:
+                        torch.save(self.optimizer.state_dict(), self.save_dir.joinpath(f'best_optimize.pth').as_posix())
 
                 effect_idx += 1
 

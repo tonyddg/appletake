@@ -223,19 +223,19 @@ def eval_record_to_tensorbard(
             )
         
         if reward_list is not None:
-            return_tag = root_tag + "/episode_" + str(num_ep) + "/discount_return"
+            reward_tag = root_tag + "/episode_" + str(num_ep) + "/reward"
             
-            total_length = len(reward_list)
-            ep_return = 0
-            ep_return_list = np.zeros(total_length)
+            # total_length = len(reward_list)
+            # ep_return = 0
+            # ep_return_list = np.zeros(total_length)
 
-            for t in range(total_length):
-                ep_return = reward_list[-1 - t] + ep_return * return_gamma
-                ep_return_list[total_length - t - 1] = ep_return
-                # tb_writer.add_scalar(return_tag, ep_return, total_length - t - 1)
+            # for t in range(total_length):
+            #     ep_return = reward_list[-1 - t] + ep_return * return_gamma
+            #     ep_return_list[total_length - t - 1] = ep_return
+            #     # tb_writer.add_scalar(return_tag, ep_return, total_length - t - 1)
 
-            for t in range(total_length):
-                tb_writer.add_scalar(return_tag, ep_return_list[t], t)
+            for i, r in enumerate(reward_list):
+                tb_writer.add_scalar(reward_tag, r, i)
 
         if critic_list is not None:
             critic_tag = root_tag + "/episode_" + str(num_ep) + "/critic"
@@ -307,21 +307,23 @@ def eval_record_to_file(
             clip.write_gif(vedio_name_pattern.format(num_ep), fps = fps, logger = None)
 
         if reward_list is not None:
-            total_length = len(reward_list)
-            ep_return = 0
-            ep_return_list = np.zeros(total_length)
+            # total_length = len(reward_list)
+            # ep_return = 0
+            # ep_return_list = np.zeros(total_length)
 
-            for t in range(total_length):
-                ep_return = reward_list[-1 - t] + ep_return * return_gamma
-                ep_return_list[total_length - t - 1] = ep_return
+            # for t in range(total_length):
+            #     ep_return = reward_list[-1 - t] + ep_return * return_gamma
+            #     ep_return_list[total_length - t - 1] = ep_return
 
-            reward_buf.append(ep_return_list)
+            # reward_buf.append(ep_return_list)
+            reward_list = np.asarray(reward_list)
+            reward_buf.append(reward_list)
 
             if is_save_return_plot:
                 fig, axe = plt.subplots()
-                axe.plot(ep_return_list)
+                axe.plot(reward_list)
                 axe.set_xlabel("Time Step")
-                axe.set_ylabel("Return")
+                axe.set_ylabel("Reward")
                 axe.set_title(f"Eval {num_ep} return-time")
                 fig.savefig(reward_plot_name_pattern.format(num_ep))
 
