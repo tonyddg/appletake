@@ -77,19 +77,37 @@ def get_force_channel_diff_trans(origin_trans: A.Sequential):
 
 def get_coarse_aug(noise_p: float, noise_scale: float = 1, is_train: bool = False):
     return A.Sequential([
+
         # 模拟无法填充的大空洞 (防止模型仅关注特定区域)
         A.CoarseDropout(
-            num_holes_range = (1, 3),
-            hole_height_range = (16, int(64 * noise_scale)),
-            hole_width_range = (16, int(64 * noise_scale)),
+            num_holes_range = (1, 1),
+            hole_height_range = (32, int(64 * noise_scale)),
+            hole_width_range = (32, int(64 * noise_scale)),
+            fill = 1,
+            p = noise_p / 2 if is_train else 0
+        ),
+        # 模拟小空洞
+        A.CoarseDropout(
+            num_holes_range = (3, int(6 * noise_scale)),
+            hole_height_range = (8, 32),
+            hole_width_range = (8, 32),
+            fill = 1,
+            p = noise_p
+        ),
+
+        # 模拟无法填充的大空洞 (防止模型仅关注特定区域)
+        A.CoarseDropout(
+            num_holes_range = (1, 1),
+            hole_height_range = (32, int(64 * noise_scale)),
+            hole_width_range = (32, int(64 * noise_scale)),
             fill = 0,
             p = noise_p / 2 if is_train else 0
         ),
         # 模拟小空洞
         A.CoarseDropout(
-            num_holes_range = (4, int(16 * noise_scale)),
-            hole_height_range = (4, 16),
-            hole_width_range = (4, 16),
+            num_holes_range = (3, int(6 * noise_scale)),
+            hole_height_range = (8, 32),
+            hole_width_range = (8, 32),
             fill = 0,
             p = noise_p
         ),
@@ -97,13 +115,13 @@ def get_coarse_aug(noise_p: float, noise_scale: float = 1, is_train: bool = Fals
 
 def get_depth_aug(noise_p: float, noise_scale: float = 1, is_train: bool = False):
     return A.Sequential([
-
-        # 模拟深度估计误差
-        # A.MotionBlur(
-        #     (int(2 * noise_scale + 1), int(2 * noise_scale + 3)), p = noise_p
-        # ),
         A.GaussNoise(
-            (0.02, 0.05 * noise_scale),
+            # 最大误差范围 0.012mm ~ 0.030mm (0.6, 5%)
+            # 转化为方差 0.004 ~ 0.010
+            # 归一化 0.0114 ~ 0.0285714286
+            # 使用 0.01 ~ 0.03
+            (0.01, 0.03 * noise_scale),
+            # (0.02, 0.05 * noise_scale),
             noise_scale_factor = 1,
             p = noise_p
         ),
@@ -112,23 +130,28 @@ def get_depth_aug(noise_p: float, noise_scale: float = 1, is_train: bool = False
 
         # 模拟小空洞填充
         # A.Morphological((4, 6), p = noise_p),
-        A.MedianBlur((5, 11), p = noise_p),
+        A.MedianBlur((3, 11), p = noise_p),
     ], p = 1)
 
 def get_depth_aug_single_view(noise_p: float, noise_scale: float = 1, is_train: bool = False):
     return A.Sequential([
 
         A.GaussNoise(
-            (0.01, 0.08 * noise_scale),
+            (0.02, 0.05 * noise_scale),
             noise_scale_factor = 1,
             p = noise_p
         ),
 
         get_coarse_aug(noise_p, noise_scale, is_train),
 
+        # 真实场景可能需要
+        # A.ElasticTransform(
+        #     alpha = 50, sigma = 10, approximate = False, p = 1 if is_train else 0
+        # ),
+
         # 模拟小空洞填充
         # A.Morphological((4, 6), p = noise_p),
-        A.MedianBlur((5, 11), p = noise_p),
+        A.MedianBlur((3, 11), p = noise_p),
     ], p = 1)
 
 

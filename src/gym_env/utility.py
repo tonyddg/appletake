@@ -70,6 +70,30 @@ def eular_to_quat(pos_eular: np.ndarray, is_deg: bool) -> np.ndarray:
     res[3:] = R.from_euler("zyx", np.flip(pos_eular[3:]), is_deg).as_quat()
     return res
 
+def quat_to_eular(pos_quat: np.ndarray, is_deg: bool) -> np.ndarray:
+    '''
+    将 px, py, pz, qx, qy, qz, qw 规范 (欧拉角, deg) 的位置转换为 x, y, z, a, b, c
+    '''
+    res = np.zeros(6)
+    res[:3] = pos_quat[:3]
+    res[3:] = np.flip(R.from_quat(pos_quat[3:]).as_euler("zyx", is_deg))
+    return res
+
+def change_move_center(move_pos_eular: np.ndarray, new_center: np.ndarray):
+    T = np.identity(4)
+    T[3, :3] = move_pos_eular[:3]
+    T[:3, :3] = R.from_quat(move_pos_eular[3:]).as_matrix()
+
+    D = np.identity(4)
+    D[3, :3] = new_center
+
+    T_new = np.linalg.inv(D) @ T @ D
+    res = np.zeros(7)
+    res[:3] = T_new[3, :3]
+    res[3:] = R.from_matrix(T[:3, :3]).as_quat()
+
+    return res
+
 def mmdeg_to_mrad(pose: np.ndarray):
     # 防止原地修改导致的错误
     pose = pose.copy()

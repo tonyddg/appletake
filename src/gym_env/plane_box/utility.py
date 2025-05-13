@@ -44,6 +44,8 @@ def planebox_eval(
 
     pos_diff_list = []
     rot_diff_list = []
+    diff_x_list = []
+    diff_y_list = []
 
     done_continue_critic_list = []
     done_done_critic_list = []
@@ -54,6 +56,8 @@ def planebox_eval(
     def eval_record_callback(_locals: Dict[str, Any], _globals: Dict[str, Any]):
         nonlocal pos_diff_list
         nonlocal rot_diff_list
+        nonlocal diff_x_list
+        nonlocal diff_y_list
 
         i = _locals["i"]
         acts = _locals["actions"][i]
@@ -64,6 +68,8 @@ def planebox_eval(
         if done:
             pos_diff_list.append(info["pos_diff"])
             rot_diff_list.append(info["rot_diff"])
+            diff_x_list.append(info["diff_x"])
+            diff_y_list.append(info["diff_y"])
 
             if is_parameter_space:
                 done_continue_critic_list.append(acts[6])
@@ -131,18 +137,23 @@ def planebox_eval(
     pos_diff_array = np.array(pos_diff_list)
     rot_diff_array = np.array(rot_diff_list)
 
-    # assert isinstance(ep_reward_list, list) and isinstance(ep_length_list, list), "return_episode_rewards 需要为 True"
+    diff_x_array = np.array(diff_x_list)
+    diff_y_array = np.array(diff_y_list)
 
-    # ep_reward_array = np.asarray(ep_reward_list)
-    # ep_length_array = np.asarray(ep_length_list)
+    assert isinstance(ep_reward_list, list) and isinstance(ep_length_list, list), "return_episode_rewards 需要为 True"
+
+    ep_reward_array = np.asarray(ep_reward_list)
+    ep_length_array = np.asarray(ep_length_list)
 
     with open(save_root.joinpath("diff.npz"), 'wb') as f:
         np.savez(
             f, 
             pos_diff = pos_diff_array,
             rot_diff = rot_diff_array,
-            # ep_reward = ep_reward_array,
-            # ep_length = ep_length_array
+            diff_x = diff_x_array,
+            diff_y = diff_y_array,
+            ep_reward = ep_reward_array,
+            ep_length = ep_length_array
         )
     if is_save_return_plot:
 
@@ -155,6 +166,31 @@ def planebox_eval(
         axes[1].set_title(f"rot a:{np.mean(rot_diff_array):.2e}, s:{np.std(rot_diff_array):.2e}")
 
         fig.savefig(plot_name_pattern.format("pos_diff"))
+        plt.close(fig)
+
+        ########
+
+        fig, axes = plt.subplots()
+
+        bad_cnt = np.zeros(diff_x_array.shape, dtype = np.int32)
+        bad_cnt[diff_x_array > 0.0025] = 1
+        bad_cnt[diff_y_array > 0.0025] = 1
+
+        # c = np.zeros(diff_x_array.shape, dtype = np.str_)
+        # c[:] = "C0"
+        # c[bad_cnt == 1] = "C1"
+
+        axes.scatter(diff_x_array[bad_cnt == 0], diff_y_array[bad_cnt == 0], c = 'C0')
+        axes.scatter(diff_x_array[bad_cnt == 1], diff_y_array[bad_cnt == 1], c = 'C1')
+
+        axes.axhline(0, color = "C0")
+        axes.axvline(0, color = "C0")
+
+        axes.axhline(0.0025, color = "C1")
+        axes.axvline(0.0025, color = "C1")
+
+        axes.set_title(f"x y diff disturb bc: {np.sum(bad_cnt)}")
+        fig.savefig(plot_name_pattern.format("xy_diff"))
         plt.close(fig)
 
         ########

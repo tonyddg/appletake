@@ -322,8 +322,9 @@ class RewardPassiveTimeout(RewardFnABC):
             last_pos_dis = subenv.episode_info["last_pos_dis"]
             last_rot_dis = subenv.episode_info["last_rot_dis"]
 
-            pos_move_ratio = float(np.clip(last_pos_dis - pos_dis / self.max_move_pos_dis, -1, 1))
-            rot_move_ratio = float(np.clip(last_rot_dis - rot_dis / self.max_move_rot_dis, -1, 1))
+            # 奖励函数存在 bug
+            pos_move_ratio = float(np.clip((last_pos_dis - pos_dis) / self.max_move_pos_dis, -1, 1))
+            rot_move_ratio = float(np.clip((last_rot_dis - rot_dis) / self.max_move_rot_dis, -1, 1))
             move_reward = self.max_move_reward * (pos_move_ratio + rot_move_ratio) / 2
 
             pos_approach_ratio = clip_ratio(float(pos_dis), self.max_approach_pos_dis) # max(float(self.max_align_pos_dis - pos_dis), 0.0) / (self.max_align_pos_dis)

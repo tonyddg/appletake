@@ -77,6 +77,13 @@ class ThreeSubEnv(PlaneBoxSubenvBase):
 
         env_align_deg_check: float = 1.2,
         env_max_step: int = 20,
+        # 是否将运动坐标系设置在拐角
+        env_is_corner_move: bool = False,
+
+        # debug, 用于调整最佳插入位置为无间隙区域以用于测试卷积神经网络的性能 (需要根据不同的场景具体实现)
+        debug_center_check: bool = False,
+        # debug, 用于模拟重心偏移下的误差分布 (用于训练特征提取器)
+        debug_is_fake_center_err: bool = False,
 
         # 三个已放置纸箱的尺寸范围 (单位 m)
         three_fixbox_size_range: Optional[Tuple[np.ndarray, np.ndarray]] = None,
@@ -117,6 +124,9 @@ class ThreeSubEnv(PlaneBoxSubenvBase):
             env_random_sigma = env_random_sigma,
             env_tolerance_offset = env_tolerance_offset, env_center_adjust = env_center_adjust,
             env_align_deg_check = env_align_deg_check, env_max_step = env_max_step,
+            env_is_corner_move = env_is_corner_move,
+            debug_center_check = debug_center_check,
+            debug_is_fake_center_err = debug_is_fake_center_err,
             **subenv_kwargs
         )
 
@@ -136,7 +146,7 @@ class ThreeSubEnv(PlaneBoxSubenvBase):
                 self.fixbox_list[i] = None
 
     def _set_fixbox_scale(self, fixbox_size: np.ndarray, box_gap: np.ndarray):
-        # A 对角, B 上侧, C 右侧, D 上侧额外, E 右侧额外
+        # A 对角, B 上侧 -y, C 右侧 -x, D 上侧额外, E 右侧额外
         # set_type = bool(np.random.random() > 0.5)
         # 基于对角纸箱在最小长度的 ±10% 范围内扰动, 防止不可能的极端情况
 
@@ -263,11 +273,19 @@ class ThreeSubEnv(PlaneBoxSubenvBase):
             np.max(fixbox_size[:, 2])
         ]) * 1e3)
         # print(self.env_center_adjust)
-        set_pose6_by_self(self.anchor_center_align_movebox_pose, np.array([
-            self.env_center_adjust, 
-            self.env_center_adjust, 
-            0
-        ]) * 1e3)
+        self.zoffset = np.max(fixbox_size[:, 2])
+
+        if not self.debug_center_check:
+            set_pose6_by_self(self.anchor_center_align_movebox_pose, np.array([
+                self.env_center_adjust, 
+                self.env_center_adjust, 
+                0
+            ]) * 1e3)
+        else:
+            set_pose6_by_self(self.anchor_test_object, np.array([self.env_tolerance_offset / 2, self.env_tolerance_offset / 2, 0]) * 1e3)
+
+        # debug
+        # set_pose6_by_self(self.anchor_test_object, np.array([self.env_tolerance_offset / 2, self.env_tolerance_offset / 2, 0]) * 1e3)
 
     def _set_init_fixbox_scale(self):
 
@@ -383,6 +401,15 @@ class ThreeEnv(PlaneBoxEnv):
         # 时间长度是否为无限长
         env_is_unlimit_time: bool = True,
         env_is_terminate_when_insert: bool = False,
+        # 是否将运动坐标系设置在拐角
+        env_is_corner_move: bool = False,
+
+        dataset_is_center_goal: bool = False,
+        # debug, 用于调整最佳插入位置为无间隙区域以用于测试卷积神经网络的性能 (需要根据不同的场景具体实现)
+        debug_center_check: bool = False,
+        debug_close_pr: bool = False,
+        # debug, 用于模拟重心偏移下的误差分布 (用于训练特征提取器)
+        debug_is_fake_center_err: bool = False,
 
         three_fixbox_size_range: Optional[Tuple[Union[Sequence[float], np.ndarray], Union[Sequence[float], np.ndarray]]] = None,
         # 纸箱对齐侧长度变动比率
@@ -418,7 +445,12 @@ class ThreeEnv(PlaneBoxEnv):
             # env_minium_ratio = env_minium_ratio,
             # progress_end_timestep_ratio = progress_end_timestep_ratio,
             env_random_sigma = env_random_sigma,
+            env_is_corner_move = env_is_corner_move,
             act_unit = act_unit, # train_total_timestep = train_total_timestep,
+            debug_center_check = debug_center_check,
+            debug_close_pr = debug_close_pr,
+            debug_is_fake_center_err = debug_is_fake_center_err,
+            dataset_is_center_goal = dataset_is_center_goal,
             three_fixbox_size_range = _three_fixbox_size_range,
             three_size_disturb_range = three_size_disturb_range,
             three_extra_fixbox_prob = three_extra_fixbox_prob,

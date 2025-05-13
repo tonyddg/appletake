@@ -19,7 +19,7 @@ from warnings import warn
 from ...net.pr_task_dataset import PrTaskVecEnvForDatasetInterface
 
 from ...pr.shape_size_setter import ShapeSizeSetter
-from ..utility import get_rel_pose, mrad_to_mmdeg, set_pose6_by_self, DIRECT2INDEX, tuple_seq_asnumpy, rot_to_rotvec, DistSampler # , progressive_sample_float, progressive_sample_vec
+from ..utility import get_rel_pose, mrad_to_mmdeg, set_pose6_by_self, DIRECT2INDEX, tuple_seq_asnumpy, rot_to_rotvec, DistSampler, change_move_center, quat_to_eular # , progressive_sample_float, progressive_sample_vec
 from ...utility import get_file_time_str
 from ...conio.key_listen import KEY_CB_DICT_TYPE
 # from .reward import RewardSpare
@@ -126,6 +126,14 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         env_max_step: int = 20,
         # 额外的角度检查
         env_align_deg_check: float = 1.2,
+
+        # 是否将运动坐标系设置在拐角
+        env_is_corner_move: bool = False,
+
+        # debug, 用于调整最佳插入位置为无间隙区域以用于测试卷积神经网络的性能 (需要根据不同的场景具体实现)
+        debug_center_check: bool = False,
+        # debug, 用于模拟重心偏移下的误差分布 (用于训练特征提取器)
+        debug_is_fake_center_err: bool = False,
 
         # 是否主动进行插入决策
         # action_is_insert_decision: bool = False,
@@ -260,7 +268,24 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         self._subenv_step: int = 0
         # self._last_render: Optional[np.ndarray] = None
 
+        ###
+
+        self.env_is_corner_move = env_is_corner_move
+        # if self.env_is_corner_move:
+        #     self.anchor_box_corner_rel_core = Dummy.create()
+        #     self.anchor_box_corner_rel_core.set_name("BoxCorner" + name_suffix)
+        #     self.anchor_box_corner_rel_core.set_parent(self.anchor_core_object)
+
+        ###
+
+        self.debug_center_check = debug_center_check
+        self.debug_is_fake_center_err = debug_is_fake_center_err
+
         ### 
+
+        # 用于确定插入测试的深度
+        self.zoffset = 0
+
         # 每个 episode 刷新的信息字典
         self.episode_info = {}
     ###
@@ -299,26 +324,27 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
     def is_collision_with_env(self):
         return self.env_object.check_collision(self.move_box)
     
-    # def pre_alignment_detect(
-    #         self
-    #     ):
-    #     self._cur_position_move_box_relcore = self.move_box.get_position(self.anchor_core_object) 
-    #     # 执行插入检测前的准备
-    #     self.move_box.set_position([0, 0, -self.env_test_in], self.move_box)
+    def pre_alignment_detect(
+            self
+        ):
+        self._cur_position_move_box_relcore = self.move_box.get_position(self.anchor_core_object) 
+        # 执行插入检测前的准备
+        self.move_box.set_position([0, 0, -self.zoffset], self.move_box)
 
-    # def post_alignment_detect(self):
-    #     assert self._cur_position_move_box_relcore is not None, "请先执行 pre_alignment_detect"
+    def post_alignment_detect(self):
+        assert self._cur_position_move_box_relcore is not None, "请先执行 pre_alignment_detect"
 
-    #     is_collision = self.test_wall.check_collision(self.move_box)
-    #     is_alignment = self.move_box.check_collision(self.test_check)
+        is_collision = self.test_wall.check_collision(self.move_box) and self.is_collision_with_env()
+        # is_alignment = self.move_box.check_collision(self.test_check)
 
-    #     self.move_box.set_position(self._cur_position_move_box_relcore, self.anchor_core_object)
-    #     # 碰撞到检测区域, 并且没有碰撞到插座区域
-    #     # print(f"collision wall: {is_collision}")
-    #     # print(f"alignment check: {is_alignment}")
-    #     return (not is_collision) and is_alignment
+        self.move_box.set_position(self._cur_position_move_box_relcore, self.anchor_core_object)
+        self._cur_position_move_box_relcore = None
+        # 碰撞到检测区域, 并且没有碰撞到插座区域
+        # print(f"collision wall: {is_collision}")
+        # print(f"alignment check: {is_alignment}")
+        return (not is_collision) # and is_alignment
 
-    def alignment_detect(self):
+    def base_alignment_detect(self):
         # assert self._cur_position_move_box_relcore is not None, "请先执行 pre_alignment_detect"
 
         is_collision = self.test_wall.check_collision(self.move_box)
@@ -364,19 +390,39 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         self._to_origin_state()
         self.anchor_center_align_movebox_pose.remove()
         self.anchor_best_align_movebox_pose.remove()
+        # if self.env_is_corner_move:
+        #     self.anchor_box_corner_rel_core.remove()
 
     def _to_origin_state(self):
         '''
         返回原始状态
         '''
 
+        # if self.env_is_corner_move:
+        #     self.anchor_move_object.set_parent(self.anchor_core_object)
+
         # 核心锚点 (移动物体与检测区域) -> None
         self.anchor_core_object.set_pose(self.origin_pose_core_anchor_relnone, None)
         # 环境锚点
         self.anchor_env_object.set_pose(self.origin_pose_env_anchor_relnone, None)
 
+        if self.env_is_corner_move:
+            self.vis_anchor.set_parent(self.anchor_core_object)
+            self.move_box.set_parent(self.anchor_core_object)
+
+            box_size = self.movebox_size_setter.get_cur_bbox()
+            self.anchor_move_object.set_position(
+                np.array([-box_size[0], -box_size[1], box_size[2]]) / 2,
+                self.move_box
+            )
+
+            self.vis_anchor.set_parent(self.anchor_move_object)
+            self.move_box.set_parent(self.anchor_move_object)
+
         # 移动锚点 (盒子与相机) -> 核心锚点
         self.anchor_move_object.set_pose(self.origin_pose_move_anchor_relcore, self.anchor_core_object)
+
+        
         # 移动盒子
         self.move_box.set_pose(self.origin_pose_move_box_relmove, self.anchor_move_object)
         # 相机
@@ -399,6 +445,8 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         # 修正探测区偏移
         self.test_wall.to_origin()
 
+        self.zoffset = 0
+
     def _set_vis_fov_offset(self, offset: float):
         operate_vis = self.color_camera if self.obs_source == "color" else self.depth_camera
         operate_vis.set_perspective_angle(self.vis_origin_persp_deg + offset)
@@ -417,8 +465,26 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         set_pose6_by_self(self.anchor_center_align_movebox_pose, np.array([-size_diff[0] / 2, -size_diff[1] / 2, size_diff[2] / 2]) * 1e3)
         set_pose6_by_self(self.anchor_best_align_movebox_pose, np.array([-size_diff[0] / 2, -size_diff[1] / 2, size_diff[2] / 2]) * 1e3)
 
+        # 设置角点锚点 (需要设置后修改盒子中心偏移)
+        if self.env_is_corner_move:
+
+            self.vis_anchor.set_parent(self.anchor_core_object)
+            self.move_box.set_parent(self.anchor_core_object)
+
+            box_size = self.movebox_size_setter.get_cur_bbox()
+            self.anchor_move_object.set_position(
+                np.array([box_size[0], box_size[1], -box_size[2]]) / 2,
+                self.move_box
+            )
+
+            self.vis_anchor.set_parent(self.anchor_move_object)
+            self.move_box.set_parent(self.anchor_move_object)
+
     def _set_movebox_center_offset(self, offset: np.ndarray):
-        set_pose6_by_self(self.move_box, offset)
+        if not self.debug_is_fake_center_err:
+            set_pose6_by_self(self.move_box, offset)
+        else:
+            set_pose6_by_self(self.anchor_move_object, offset)   
 
     def _set_init_move_anchor_pos(
             self,
@@ -475,8 +541,7 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
 
         if self.env_init_box_pos_range is not None:
             set_pose6_by_self(self.anchor_move_object, self.env_init_box_pos_range[direct])
-        if self.env_init_vis_pos_range is not None:
-            set_pose6_by_self(self.vis_anchor, self.env_init_vis_pos_range[direct])
+
         if self.env_vis_fov_disturb is not None:
             if direct == 0:
                 self._set_vis_fov_offset(-self.env_vis_fov_disturb)
@@ -485,8 +550,11 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         if self.env_movbox_size_range is not None:
             self._set_movebox_size(self.env_movbox_size_range[direct])
         if self.env_movebox_center_err is not None:
-            self._set_movebox_center_offset(self.env_movebox_center_err[direct])
-
+            self._set_movebox_center_offset(self.env_movebox_center_err[1 - direct])
+        # print(self.env_init_vis_pos_range)
+        if self.env_init_vis_pos_range is not None:
+            print(self.env_init_vis_pos_range[direct])
+            set_pose6_by_self(self.vis_anchor, self.env_init_vis_pos_range[direct])
         self.test_wall.set_offset(self.env_tolerance_offset, self.env_tolerance_offset)
         # 根据偏移调整对齐中心位置
         set_pose6_by_self(self.anchor_center_align_movebox_pose, np.array([self.env_tolerance_offset, self.env_tolerance_offset, 0]) * 1e3 / 2 * -1)
@@ -522,15 +590,15 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         '''
         返回 is_alignments, is_collisions
         '''
+        pass
+        # is_collision = self.is_collision_with_env()
+        # is_alignment = self.alignment_detect()
+        # # self.pre_alignment_detect()
+        # # pr.step()
+        # # is_alignment = self.post_alignment_detect()
+        # # pr.step()
 
-        is_collision = self.is_collision_with_env()
-        is_alignment = self.alignment_detect()
-        # self.pre_alignment_detect()
-        # pr.step()
-        # is_alignment = self.post_alignment_detect()
-        # pr.step()
-
-        return (is_alignment, is_collision)
+        # return (is_alignment, is_collision)
 
     def _step_take_action(self, action: np.ndarray, pr: PyRep):
         self.tack_action(action)
@@ -542,12 +610,13 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
         '''
         返回 is_truncated, is_alignments, is_collisions
         '''
-        is_truncated = self._step_take_action(action, pr)
-        is_alignments, is_collisions = self._step_env_check()
+        pass
+        # is_truncated = self._step_take_action(action, pr)
+        # is_alignments, is_collisions = self._step_env_check()
 
-        if is_truncated or is_alignments or is_collisions:
-            self.reset()
-        return is_truncated, is_alignments, is_collisions
+        # if is_truncated or is_alignments or is_collisions:
+        #     self.reset()
+        # return is_truncated, is_alignments, is_collisions
 
     ###
 
@@ -559,21 +628,60 @@ class PlaneBoxSubenvBase(metaclass = ABCMeta):
 
     ### 实用函数
 
+    def get_pose_to_best(self, is_center: bool = False):
+        '''
+        获取相对最佳位姿的位移 (当存在中心偏差时不准)
+        '''
+        if self.env_is_corner_move:
+            movebox_size = self.movebox_size_setter.get_cur_bbox()
+            offset_to_corner = np.array([movebox_size[0], movebox_size[1], -movebox_size[2]]) / 2
+            tmp_corner = Dummy.create()
+            if is_center:
+                tmp_corner.set_position(offset_to_corner, self.anchor_center_align_movebox_pose)
+            else:
+                tmp_corner.set_position(offset_to_corner, self.anchor_best_align_movebox_pose)
+
+            pose_diff = tmp_corner.get_pose(self.anchor_move_object)
+            tmp_corner.remove()
+
+        else:
+            if is_center:
+                pose_diff = self.anchor_center_align_movebox_pose.get_pose(self.move_box)
+            else:
+                pose_diff = self.anchor_best_align_movebox_pose.get_pose(self.move_box)
+
+        # if self.env_is_corner_move:
+        #     movebox_size = self.movebox_size_setter.get_cur_bbox()
+        #     pose_diff = change_move_center(pose_diff, np.array([movebox_size[0], movebox_size[1], -movebox_size[2]]) / 2)
+
+        return pose_diff
+
     def get_dis_norm_to_best(self, is_center: bool = False):
         '''
         获取距离最佳对齐区的距离差 (m) 与位姿差 (deg)
         '''
-        # cur_pose = subenv.anchor_move_object.get_pose(subenv.anchor_core_object)
         if is_center:
             pose_diff = self.move_box.get_pose(self.anchor_center_align_movebox_pose)
         else:
             pose_diff = self.move_box.get_pose(self.anchor_best_align_movebox_pose)
+        # pose_diff = self.get_pose_to_best(is_center)
 
         # xyz 三方向均计入惩罚
         diff_len = np.linalg.norm(pose_diff[:3], 2)
         # diff_rad = get_quat_diff_rad(cur_pose[3:], subenv.best_pose_move_anchor_relcore[3:])
         diff_deg, _ = rot_to_rotvec(pose_diff[3:])
         return diff_len, diff_deg
+
+    def get_dis_xy_to_best(self, is_center: bool = False):
+        '''
+        获取距离最佳对齐区的距离差 (m) 与位姿差 (deg)
+        '''
+        if is_center:
+            pose_diff = self.move_box.get_pose(self.anchor_center_align_movebox_pose)
+        else:
+            pose_diff = self.move_box.get_pose(self.anchor_best_align_movebox_pose)
+
+        return pose_diff[0], pose_diff[1]
 
 class RewardFnABC(metaclass = ABCMeta):
     def __init__(self) -> None:
@@ -714,6 +822,14 @@ class PlaneBoxSubenvInitProtocol(Protocol):
         env_align_deg_check: float = 1.2,
         env_max_step: int = 20,
 
+        # 是否将运动坐标系设置在拐角
+        env_is_corner_move: bool = False,
+
+        # debug, 用于调整最佳插入位置为无间隙区域以用于测试卷积神经网络的性能 (需要根据不同的场景具体实现)
+        debug_center_check: bool = False,
+        # debug, 用于模拟重心偏移下的误差分布 (用于训练特征提取器)
+        debug_is_fake_center_err: bool = False,
+
         # **subenv_kwargs: Any
     ) -> PlaneBoxSubenvBase: 
         ...
@@ -830,6 +946,9 @@ class PlaneBoxEnvActionType(Enum):
             case _:
                 raise Exception()
 
+    def is_passive(self):
+        return self is PlaneBoxEnvActionType.PASSIVE_ALWAYS or self is PlaneBoxEnvActionType.PASSIVE_END
+
 class PlaneBoxEnv(VecEnv, PrTaskVecEnvForDatasetInterface):
     def __init__(
             self,
@@ -872,8 +991,18 @@ class PlaneBoxEnv(VecEnv, PrTaskVecEnvForDatasetInterface):
             env_is_unlimit_time: bool = True,
             env_is_terminate_when_insert: bool = False,
 
+            # 是否将运动坐标系设置在拐角
+            env_is_corner_move: bool = False,
+
             # 单位 mm, deg
             act_unit: Sequence[float] = (5, 5, 5, 1, 1, 1),
+
+            # debug, 用于调整最佳插入位置为无间隙区域以用于测试卷积神经网络的性能 (需要根据不同的场景具体实现)
+            debug_center_check: bool = False,
+            # 在环境关闭时关闭 pr
+            debug_close_pr: bool = False,
+            # debug, 用于模拟重心偏移下的误差分布 (用于训练特征提取器)
+            debug_is_fake_center_err: bool = False,
 
             # 使用中心位置而不是最佳位置作为训练目标
             dataset_is_center_goal: bool = False,
@@ -891,6 +1020,9 @@ class PlaneBoxEnv(VecEnv, PrTaskVecEnvForDatasetInterface):
         if isinstance(act_type, str):
             act_type = PlaneBoxEnvActionType(act_type)
         self.act_type = act_type
+        self.act_is_passive = act_type.is_passive()
+
+        self.debug_close_pr = debug_close_pr
 
         # PASSIVE_END 将强制触发结束
         self.env_is_unlimit_time = env_is_unlimit_time or (self.act_type is PlaneBoxEnvActionType.PASSIVE_END)
@@ -930,6 +1062,11 @@ class PlaneBoxEnv(VecEnv, PrTaskVecEnvForDatasetInterface):
                 env_tolerance_offset = env_tolerance_offset,
                 env_center_adjust = env_center_adjust,
                 env_align_deg_check = env_align_deg_check, env_max_step = env_max_step,
+
+                env_is_corner_move = env_is_corner_move,
+
+                debug_center_check = debug_center_check,
+                debug_is_fake_center_err = debug_is_fake_center_err,
 
                 **subenv_env_object_kwargs
             )
@@ -1013,17 +1150,42 @@ class PlaneBoxEnv(VecEnv, PrTaskVecEnvForDatasetInterface):
         '''
         返回 is_alignments, is_collisions
         '''
-        is_collisions, is_alignments = (
+        is_collisions, is_alignments, need_post = (
             np.zeros(self.num_envs, dtype = np.bool_),
             np.zeros(self.num_envs, dtype = np.bool_),
+            np.zeros(self.num_envs, dtype = np.bool_)
         )
 
         # 碰撞检测
         for i, subenv in enumerate(self.subenv_list):
-            is_collisions[i] = subenv.is_collision_with_env()
+            if self._need_align[i]:
+                is_alignments[i] = subenv.base_alignment_detect()
+            
+            if not self._need_align[i] or self.act_is_passive:
+                is_collisions[i] = subenv.is_collision_with_env()
+            
+            # is_collisions[i] = subenv.is_collision_with_env()
 
-            if not is_collisions[i] and self._need_align[i]:
-                is_alignments[i] = subenv.alignment_detect()
+            # if not is_collisions[i] and self._need_align[i]:
+            #     is_alignments[i] = subenv.base_alignment_detect()
+
+        # # 碰撞检测
+        # is_need_post = False
+        # for i, subenv in enumerate(self.subenv_list):
+        #     is_collisions[i] = subenv.is_collision_with_env()
+        #     need_post[i] = subenv.base_alignment_detect()
+
+        #     if not is_collisions[i] and self._need_align[i] and need_post[i]:
+        #         subenv.pre_alignment_detect()
+        #         is_need_post = True
+        #         # is_alignments[i] = subenv.alignment_detect()
+
+        # if is_need_post:
+        #     self.env_pr.step()
+
+        #     for i, subenv in enumerate(self.subenv_list):
+        #         if not is_collisions[i] and self._need_align[i] and need_post[i]:
+        #             is_alignments[i] = subenv.post_alignment_detect()
 
         return is_alignments, is_collisions
 
@@ -1069,6 +1231,10 @@ class PlaneBoxEnv(VecEnv, PrTaskVecEnvForDatasetInterface):
                 pos_diff, rot_diff = self.subenv_list[i].get_dis_norm_to_best(True)
                 infos[i]["pos_diff"] = pos_diff
                 infos[i]["rot_diff"] = rot_diff
+
+                diff_x, diff_y = self.subenv_list[i].get_dis_xy_to_best(True)
+                infos[i]["diff_x"] = diff_x
+                infos[i]["diff_y"] = diff_y
 
                 # if self.progress_stop_timestep != None:
                 #     subenv.set_train_progress(
@@ -1134,6 +1300,10 @@ class PlaneBoxEnv(VecEnv, PrTaskVecEnvForDatasetInterface):
             # 删除初始化环境时创建的锚点
             subenv._close_env()
 
+        if self.debug_close_pr:
+            self.env_pr.stop()
+            self.env_pr.shutdown()
+
     ### 未实现的虚函数
 
     def set_attr(self, attr_name, value, indices=None):
@@ -1165,24 +1335,25 @@ class PlaneBoxEnv(VecEnv, PrTaskVecEnvForDatasetInterface):
         get_rel_pose(subenv.plug.get_pose(None), subenv.plug_best_pose)
         '''
 
-        if self.dataset_is_center_goal:
-            return [
-                # 转为 float32 用于训练
-                np.asarray(
-                    mrad_to_mmdeg(
-                        get_rel_pose(subenv.move_box.get_pose(subenv.anchor_core_object), subenv.anchor_center_align_movebox_pose.get_pose(subenv.anchor_core_object))
-                    ), np.float32)
-                for subenv in self.subenv_list
-            ]
-        else:
-            return [
-                # 转为 float32 用于训练
-                np.asarray(
-                    mrad_to_mmdeg(
-                        get_rel_pose(subenv.move_box.get_pose(subenv.anchor_core_object), subenv.anchor_best_align_movebox_pose.get_pose(subenv.anchor_core_object))
-                    ), np.float32)
-                for subenv in self.subenv_list
-            ]
+        # if self.dataset_is_center_goal:
+        return [
+            # 转为 float32 用于训练
+            np.asarray(
+                mrad_to_mmdeg(
+                    quat_to_eular(subenv.get_pose_to_best(self.dataset_is_center_goal), False)
+                    # get_rel_pose(subenv.move_box.get_pose(subenv.anchor_core_object), subenv.anchor_center_align_movebox_pose.get_pose(subenv.anchor_core_object))
+                ), np.float32)
+            for subenv in self.subenv_list
+        ]
+        # else:
+        #     return [
+        #         # 转为 float32 用于训练
+        #         np.asarray(
+        #             mrad_to_mmdeg(
+        #                 get_rel_pose(subenv.move_box.get_pose(subenv.anchor_core_object), subenv.anchor_best_align_movebox_pose.get_pose(subenv.anchor_core_object))
+        #             ), np.float32)
+        #         for subenv in self.subenv_list
+        #     ]
 
     def dataset_get_list_obs(self) -> List[np.ndarray]:
         '''
@@ -1380,9 +1551,13 @@ class PlaneBoxEnvTest:
 
     def to_center_init(self):
         env = self.plane_box_env.subenv_list[self.watch_idx]
+        # pose_diff = env.anchor_center_align_movebox_pose.get_pose(env.move_box)
+        
+        # if env.env_is_corner_move:
+        #     movebox_size = env.movebox_size_setter.get_cur_bbox()
+        #     pose_diff = change_move_center(pose_diff, np.array([movebox_size[0], movebox_size[1], -movebox_size[2]]) / 2)
 
-        pose_diff = env.anchor_center_align_movebox_pose.get_pose(env.move_box)
-        env.anchor_move_object.set_pose(pose_diff, env.anchor_move_object)
+        env.anchor_move_object.set_pose(env.get_pose_to_best(True), env.anchor_move_object)
 
         # print(env.anchor_best_movebox_pose.get_pose(env.anchor_env_object))
         # print(env.movebox_size_setter.get_cur_bbox())

@@ -56,6 +56,11 @@ class ParalleSubEnv(PlaneBoxSubenvBase):
 
         env_align_deg_check: float = 1.2,
         env_max_step: int = 20,
+        # 是否将运动坐标系设置在拐角
+        env_is_corner_move: bool = False,
+
+        # debug, 用于调整最佳插入位置为无间隙区域以用于测试卷积神经网络的性能 (需要根据不同的场景具体实现)
+        debug_center_check: bool = False,
 
         # 对齐纸箱的尺寸偏移范围 (原始尺寸 0.15 x 0.15 x 0.15)
         paralle_fixbox_size_range: Optional[Tuple[np.ndarray, np.ndarray]] = None,
@@ -68,6 +73,8 @@ class ParalleSubEnv(PlaneBoxSubenvBase):
         
         # 纸箱间间隙尺寸范围
         paralle_box_gap_range: Optional[Tuple[float, float]] = None,
+
+        paralle_plane_height_range: Tuple[float, float] = (0.05, 0.30),
 
         **subenv_kwargs: Any,
     ) -> None:
@@ -91,6 +98,8 @@ class ParalleSubEnv(PlaneBoxSubenvBase):
             env_random_sigma = env_random_sigma,
             env_tolerance_offset = env_tolerance_offset, env_center_adjust = env_center_adjust,
             env_align_deg_check = env_align_deg_check, env_max_step = env_max_step,
+            env_is_corner_move = env_is_corner_move,
+            debug_center_check = debug_center_check,
             **subenv_kwargs
         )
 
@@ -99,6 +108,11 @@ class ParalleSubEnv(PlaneBoxSubenvBase):
         self.paralle_extra_fixbox_prob = paralle_extra_fixbox_prob
         self.paralle_box_gap_range = paralle_box_gap_range
         self.paralle_is_zero_middle = paralle_is_zero_middle
+        self.paralle_plane_height_range = paralle_plane_height_range
+
+        self.origin_pose_corner_rel_env = self.corner.get_pose(self.anchor_env_object)
+        self.origin_pose_plane_rel_env = self.plane.get_pose(self.anchor_env_object)
+        self.plane_size_setter = ShapeSizeSetter(self.plane)
 
     def _to_origin_state(self):
         super()._to_origin_state()
@@ -108,11 +122,23 @@ class ParalleSubEnv(PlaneBoxSubenvBase):
             if self.fixbox_env_object.fixboxB.exists(self.fixbox_env_object.fixboxB.get_name()):
                 self.fixbox_env_object.fixboxB.remove()
             self.fixbox_env_object.fixboxB = None
+        
+        self.corner.set_pose(self.origin_pose_corner_rel_env, self.anchor_env_object)
+        self.plane.set_pose(self.origin_pose_plane_rel_env, self.anchor_env_object)
+        self.plane_size_setter.to_origin_size()
 
-    def _set_fixbox_scale(self, fixbox_size: np.ndarray, disturb_size: np.ndarray, box_gap: float):
+    def _set_fixbox_scale(self, fixbox_size: np.ndarray, disturb_size: np.ndarray, box_gap: float, plane_height: float):
         # A 对角, B 额外
 
         movebox_size = self.movebox_size_setter.get_cur_bbox()
+
+        # print(self.plane_size_setter.get_cur_bbox())
+        height_diff = self.plane_size_setter.set_size([None, None, plane_height])[2]
+        # print(self.plane_size_setter.get_cur_bbox())
+        set_pose6_by_self(self.plane, np.array([0, 0, height_diff / 2 * 1e3]))
+        set_pose6_by_self(self.corner, np.array([0, 0, height_diff * 1e3]))
+        set_pose6_by_self(self.anchor_core_object, np.array([0, 0, height_diff * 1e3]))
+        # print(height_diff)
 
         self.fixbox_env_object.fixboxA = create_fixbox(fixbox_size[0], self.corner)
 
@@ -176,14 +202,19 @@ class ParalleSubEnv(PlaneBoxSubenvBase):
                 self.fixbox_env_object.fixboxB.set_position([-fixbox_size[0, 0] - box_gap, 0, 0], self.fixbox_env_object.fixboxB)
 
         set_pose6_by_self(self.anchor_core_object, np.array([-align_x, -align_y, align_z]) * 1e3)
-        # 将间隙控制在对齐边缘两侧而不是单侧
-        set_pose6_by_self(self.anchor_test_object, np.array([test_offset_x, test_offset_y, 0]) * 1e3)
-        set_pose6_by_self(self.anchor_center_align_movebox_pose, np.array([test_offset_x, test_offset_y, 0]) * 1e3)
+        self.zoffset = align_z
 
-        if is_upper:
-            set_pose6_by_self(self.anchor_center_align_movebox_pose, np.array([self.env_center_adjust, 0, 0]) * 1e3)
+        # 将间隙控制在对齐边缘两侧而不是单侧
+        if not self.debug_center_check:
+            set_pose6_by_self(self.anchor_test_object, np.array([test_offset_x, test_offset_y, 0]) * 1e3)
+            set_pose6_by_self(self.anchor_center_align_movebox_pose, np.array([test_offset_x, test_offset_y, 0]) * 1e3)
+
+            if is_upper:
+                set_pose6_by_self(self.anchor_center_align_movebox_pose, np.array([self.env_center_adjust, 0, 0]) * 1e3)
+            else:
+                set_pose6_by_self(self.anchor_center_align_movebox_pose, np.array([0, self.env_center_adjust, 0]) * 1e3)
         else:
-            set_pose6_by_self(self.anchor_center_align_movebox_pose, np.array([0, self.env_center_adjust, 0]) * 1e3)
+            set_pose6_by_self(self.anchor_test_object, np.array([self.env_tolerance_offset / 2, self.env_tolerance_offset / 2, 0]) * 1e3)
 
     def _set_init_fixbox_scale(self):
         if self.paralle_fixbox_size_range is None or self.paralle_size_disturb_range is None:
@@ -205,7 +236,9 @@ class ParalleSubEnv(PlaneBoxSubenvBase):
         else:
             box_gap = 0
 
-        self._set_fixbox_scale(fixbox_size, disturb_size, box_gap)
+        plane_height = self.sample_float(self.paralle_plane_height_range[0], self.paralle_plane_height_range[1])
+
+        self._set_fixbox_scale(fixbox_size, disturb_size, box_gap, plane_height)
 
     def _set_max_init(self, direct: Literal[0, 1] = 0):
         '''
@@ -225,7 +258,7 @@ class ParalleSubEnv(PlaneBoxSubenvBase):
                 np.array([
                     self.paralle_fixbox_size_range[int(np.random.random() > 0.5)],
                     self.paralle_fixbox_size_range[int(np.random.random() > 0.5)],
-                ]), disturb_size, box_gap
+                ]), disturb_size, box_gap, self.paralle_plane_height_range[direct]
             )
 
     def reset(self):
@@ -281,6 +314,13 @@ class ParalleEnv(PlaneBoxEnv):
         # 时间长度是否为无限长
         env_is_unlimit_time: bool = True,
         env_is_terminate_when_insert: bool = False,
+        # 是否将运动坐标系设置在拐角
+        env_is_corner_move: bool = False,
+
+        dataset_is_center_goal: bool = False,
+        # debug, 用于调整最佳插入位置为无间隙区域以用于测试卷积神经网络的性能 (需要根据不同的场景具体实现)
+        debug_center_check: bool = False,
+        debug_close_pr: bool = False,
 
         paralle_fixbox_size_range: Optional[Tuple[Union[Sequence[float], np.ndarray], Union[Sequence[float], np.ndarray]]] = None,
         # 额外纸箱对齐变动比率
@@ -292,6 +332,8 @@ class ParalleEnv(PlaneBoxEnv):
         
         # 纸箱间间隙尺寸范围
         paralle_box_gap_range: Optional[Tuple[float, float]] = None,
+
+        paralle_plane_height_range: Tuple[float, float] = (0.050, 0.300),
 
 
     ) -> None:
@@ -318,12 +360,20 @@ class ParalleEnv(PlaneBoxEnv):
             # progress_end_timestep_ratio = progress_end_timestep_ratio,
             # train_total_timestep = train_total_timestep,
             env_random_sigma = env_random_sigma,
+
+            env_is_corner_move = env_is_corner_move,
+
             act_unit = act_unit, act_type = act_type, 
+            debug_center_check = debug_center_check,
+            debug_close_pr = debug_close_pr,
+            dataset_is_center_goal = dataset_is_center_goal,
+            
             paralle_fixbox_size_range = _paralle_fixbox_size_range,
             paralle_size_disturb_range = paralle_size_disturb_range,
             paralle_extra_fixbox_prob = paralle_extra_fixbox_prob,
             paralle_box_gap_range = paralle_box_gap_range,
             paralle_is_zero_middle = paralle_is_zero_middle,
+            paralle_plane_height_range = paralle_plane_height_range,
             env_is_unlimit_time = env_is_unlimit_time, env_is_terminate_when_insert = env_is_terminate_when_insert
         )
 
