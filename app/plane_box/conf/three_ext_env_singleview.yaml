@@ -11,6 +11,8 @@ train_env:
     three_box_gap_range: [0, 0.010]
     three_is_zero_middle: false
 
+    obs_trans: "@ext_trans_single"
+
   wrapper:
     -
       type: 'src.sb3.vec_wrap:NetFeatObsWrapper'
@@ -18,7 +20,8 @@ train_env:
         "@net": 
           type: "make_effv1_backbone" # "make_effv1_direct" # "make_effv1_backbone"
           kwargs:
-            path: "model/plane_box/ext/three/best.pth"
+            channels: 1
+            path: "model/plane_box/ext_singleview/three/best.pth"
         feat_dim: 1280
 
 eval_env:

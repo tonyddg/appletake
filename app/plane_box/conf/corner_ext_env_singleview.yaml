@@ -7,8 +7,8 @@ train_env:
       - [0.12, 0.12, 0.12]
       - [0.30, 0.30, 0.20]
 
-    obs_trans: "@ext_trans"
-    
+    obs_trans: "@ext_trans_single"
+
   wrapper: 
     -
       type: 'src.sb3.vec_wrap:NetFeatObsWrapper'
@@ -16,5 +16,6 @@ train_env:
         "@net": 
           type: "make_effv1_backbone"
           kwargs:
-            path: "model/plane_box/ext/corner/best.pth"
+            channels: 1
+            path: "model/plane_box/ext_singleview/corner/best.pth"
         feat_dim: 1280

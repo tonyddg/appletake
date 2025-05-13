@@ -5,24 +5,48 @@ train_env:
     scene_file: "scene/plane_box/base_vec6.ttt"
     num_envs: 4
     kwargs:
+      debug_close_pr: True
+      
       subenv_mid_name : "#"
       subenv_range: [0, 6]
 
       obs_trans: "@ext_trans"
       obs_source: "depth"
 
+      # env_init_box_pos_range: [
+      #     [-25, -25, -10, -1, -1, -5],
+      #     [25, 25, 10, 1, 1, 5]
+      # ]
+      # env_init_vis_pos_range: [
+      #     [-8, -8, -2, -1, -1, -1],
+      #     [8, 8, 2, 1, 1, 1]
+      # ]
+      # env_action_noise: [
+      #   0.5, 0.5, 0.5, 0.1, 0.1, 0.1
+      # ]
+      # env_vis_persp_deg_disturb: 3
+      # env_movbox_size_range: [
+      #   [0.12, 0.12, 0.12],
+      #   [0.30, 0.30, 0.20]
+      # ]
+
+      # env_movebox_center_err: [
+      #     [-25, -25, -10, -1, -1, -5],
+      #     [25, 25, 10, 1, 1, 5]
+      # ]
+
       env_init_box_pos_range: [
-          [-25, -25, -10, -1, -1, -5],
-          [25, 25, 10, 1, 1, 5]
+          [-25, -25, -10, -3, -3, -5],
+          [25, 25, 10, 3, 3, 5]
       ]
       env_init_vis_pos_range: [
-          [-2, -2, -2, -1, -1, -1],
-          [2, 2, 2, 1, 1, 1]
+          [-8, -8, -2, -1, -1, -1],
+          [8, 8, 2, 1, 1, 1]
       ]
       env_action_noise: [
         0.5, 0.5, 0.5, 0.1, 0.1, 0.1
       ]
-      env_vis_persp_deg_disturb: 2
+      env_vis_persp_deg_disturb: 3
       env_movbox_size_range: [
         [0.12, 0.12, 0.12],
         [0.30, 0.30, 0.20]
@@ -38,17 +62,17 @@ train_env:
       "@env_reward_fn": 
         type: "reward_passive_fn"
         kwargs:
-          align_fail_panelty: -0.02 # -0.1 # -0.0
-          timeout_panelty: ~ # -0.1
+          align_fail_panelty: -0.02 # -0.05 # -0.0
+          timeout_panelty: ~
 
           max_align_pos_dis_mm: 8
-          max_align_rot_dis_deg: 2
+          max_align_rot_dis_deg: 1.5
 
           max_approach_pos_dis_mm: 40
           max_approach_rot_dis_deg: 8 
 
           max_move_pos_dis_mm: 10
-          max_move_rot_dis_deg: 5
+          max_move_rot_dis_deg: 4
 
           is_attract_to_center: true
           is_square_align_reward: true
@@ -60,9 +84,9 @@ train_env:
       act_unit: [5, 5, 5, 1, 1, 1]
       act_type: "DESICION_HPPO"
 
-      env_tolerance_offset: 0.010 # 0.010
+      env_tolerance_offset: 0.010 # 0.010 # 0.010
       env_center_adjust: 0.0025
-      env_align_deg_check: 2
+      env_align_deg_check: 1.5
       env_random_sigma: ~
 
       paralle_fixbox_size_range:
@@ -73,6 +97,7 @@ train_env:
       paralle_size_disturb_range: [0.00, 0.030]
       paralle_box_gap_range: [0, 0.010]
       paralle_is_zero_middle: false
+      paralle_plane_height_range: [0.05, 0.30]
 
   wrapper: 
     -
@@ -94,10 +119,10 @@ model:
   kwargs:
     policy: MlpPolicy
     gamma: 0.9
-    n_steps: 128
-    batch_size: 256
-    gae_lambda: 0.98
-    ent_coef: 0.005
+    n_steps: 128 # 128
+    batch_size: 256 # 256
+    gae_lambda: 0.95 # 0.98
+    ent_coef: 0.0
     n_epochs: 8
     learning_rate: 2e-4
     policy_kwargs:
@@ -106,11 +131,11 @@ model:
         vf: [512, 256]
 
 trial:
-  total_timesteps: 5000000
+  total_timesteps: 1500000 # 1500000
   meta_manual_seed: 0
   meta_exp_root: runs/plane_box/finetuning/three_finetuning/ppo_ext
   meta_exp_name: trial
-  eval_freq: 25000
+  eval_freq: 50000
   eval_num_episodes: 100
   eval_pruner_warmup_ratio: 0.4
   tb_record_episodes: 5
@@ -121,5 +146,6 @@ trial:
   tb_rollout_log_record_dict:
     value_loss: train/value_loss
     loss: train/loss
+    rollout_success: rollout/success_rate
   # tb_log_critic_loss_name: train/value_loss
   # tb_log_actor_loss_name: train/loss

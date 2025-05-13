@@ -10,7 +10,7 @@ train_env:
       subenv_mid_name : "#"
       subenv_range: [0, 6]
 
-      obs_trans: "@ext_trans"
+      obs_trans: "@vec_trans"
       obs_source: "depth"
 
       # env_init_box_pos_range: [
@@ -94,15 +94,15 @@ train_env:
         - [0.12, 0.12, 0.12]
         - [0.30, 0.30, 0.20]
 
-  wrapper: 
-    -
-      type: 'src.sb3.vec_wrap:NetFeatObsWrapper'
-      kwargs:
-        "@net": 
-          type: "make_effv1_backbone"
-          kwargs:
-            path: "model/plane_box/ext/corner/best.pth"
-        feat_dim: 1280
+  wrapper: ~
+    # -
+    #   type: 'src.sb3.vec_wrap:NetFeatObsWrapper'
+    #   kwargs:
+    #     "@net": 
+    #       type: "make_effv1_backbone"
+    #       kwargs:
+    #         path: "model/plane_box/ext/corner/best.pth"
+    #     feat_dim: 1280
 
 eval_env:
   is_base_on_train: True
@@ -110,12 +110,18 @@ eval_env:
     num_envs: 1
 
 model:
-  type: src.hppo.hppo:HybridPPO
+  type: src.hppo.hppo:make_cnn_hppo
   kwargs:
+
+    features_dim: 1280
+    channel_list: [16, 32, 64, 128, 256]
+    is_full_cnn: True
+
     policy: MlpPolicy
+
     gamma: 0.9
     n_steps: 128
-    batch_size: 256
+    batch_size: 64
     gae_lambda: 0.95
     ent_coef: 0.0
     n_epochs: 8
@@ -126,11 +132,11 @@ model:
         vf: [512, 256]
 
 trial:
-  total_timesteps: 1500000
+  total_timesteps: 5000000
   meta_manual_seed: 0
   meta_exp_root: runs/plane_box/finetuning/three_finetuning/ppo_ext
   meta_exp_name: trial
-  eval_freq: 50000
+  eval_freq: 250000
   eval_num_episodes: 100
   eval_pruner_warmup_ratio: 0.4
   tb_record_episodes: 5

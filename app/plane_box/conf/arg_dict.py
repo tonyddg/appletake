@@ -31,6 +31,19 @@ def make_effv1_backbone(pth_path: str, channels: int = 3):
     net.train(False)
     return net.backbone
 
+
+# 不分离通道
+def make_effv1_direct(pth_path: str, channels: int = 3):
+    net = BackboneWithHead(
+        EfficientNetV1Backbone(
+            channels, 1, 1, 0.2
+        ), 6, 0.2
+    )
+    net.load_state_dict(torch.load(pth_path))
+    net.to(device = "cuda")
+    net.train(False)
+    return net
+
 # # 基于 SEBlock 的中期融合
 # def make_seblend_backbone(pth_path: str, fuse_stage: int = 3):
 #     net = BackboneWithHead(
@@ -85,6 +98,15 @@ LEFT_YOF_B2 = -150
 RIGHT_XOF_B2 = 270
 RIGHT_YOF_B2 = -150
 
+#############
+
+SINGLE_H = 560
+SINGLE_W = 880
+SINGLE_Y_OFFSET = -40
+
+SINGLE_OUT_H = 224
+SINGLE_OUT_W = 352
+
 exp_replace_arg_dict = dict_factory({
 
     'train_trans': A.Compose([
@@ -96,9 +118,22 @@ exp_replace_arg_dict = dict_factory({
             [(720 + WINDOW_W) // 2 + CENTER_YOF, (720 + WINDOW_W) // 2 + LEFT_YOF, (720 + WINDOW_W) // 2 + RIGHT_YOF], 
             T_SIZE, T_SIZE
         ),
-        get_depth_aug(1, 1.5, is_train = True),
+        get_depth_aug(0.8, 1.5, is_train = True),
         get_hwc2chw(False)
     ]),
+    # 'eval_trans': A.Compose([
+    #     get_coppeliasim_depth_normalize(),
+    #     multi_crop_stack(
+    #         [(1280 - WINDOW_W) // 2 + CENTER_XOF, (1280 - WINDOW_W) // 2 + LEFT_XOF, (1280 - WINDOW_W) // 2 + RIGHT_XOF], 
+    #         [(720 - WINDOW_W) // 2 + CENTER_YOF, (720 - WINDOW_W) // 2 + LEFT_YOF, (720 - WINDOW_W) // 2 + RIGHT_YOF], 
+    #         [(1280 + WINDOW_W) // 2 + CENTER_XOF, (1280 + WINDOW_W) // 2 + LEFT_XOF, (1280 + WINDOW_W) // 2 + RIGHT_XOF], 
+    #         [(720 + WINDOW_W) // 2 + CENTER_YOF, (720 + WINDOW_W) // 2 + LEFT_YOF, (720 + WINDOW_W) // 2 + RIGHT_YOF], 
+    #         T_SIZE, T_SIZE
+    #     ),
+    #     get_depth_aug(0.9, 1, is_train = False),
+    #     get_hwc2chw(False)
+    # ]),
+
     'ext_trans': A.Compose([
         get_coppeliasim_depth_normalize(),
         multi_crop_stack(
@@ -108,9 +143,23 @@ exp_replace_arg_dict = dict_factory({
             [(720 + WINDOW_W) // 2 + CENTER_YOF, (720 + WINDOW_W) // 2 + LEFT_YOF, (720 + WINDOW_W) // 2 + RIGHT_YOF], 
             T_SIZE, T_SIZE
         ),
-        get_depth_aug(1, 1, is_train = False),
+        get_depth_aug(0.9, 1, is_train = False),
         get_hwc2chw(False)
     ]),
+
+    'vec_trans': A.Compose([
+        get_coppeliasim_depth_normalize(),
+        multi_crop_stack(
+            [(1280 - WINDOW_W) // 2 + CENTER_XOF, (1280 - WINDOW_W) // 2 + LEFT_XOF, (1280 - WINDOW_W) // 2 + RIGHT_XOF], 
+            [(720 - WINDOW_W) // 2 + CENTER_YOF, (720 - WINDOW_W) // 2 + LEFT_YOF, (720 - WINDOW_W) // 2 + RIGHT_YOF], 
+            [(1280 + WINDOW_W) // 2 + CENTER_XOF, (1280 + WINDOW_W) // 2 + LEFT_XOF, (1280 + WINDOW_W) // 2 + RIGHT_XOF], 
+            [(720 + WINDOW_W) // 2 + CENTER_YOF, (720 + WINDOW_W) // 2 + LEFT_YOF, (720 + WINDOW_W) // 2 + RIGHT_YOF], 
+            T_SIZE, T_SIZE
+        ),
+        get_depth_aug(0.9, 1, is_train = False),
+        get_hwc2chw(True)
+    ]),
+
 
     'ext_trans_noaug': A.Compose([
         get_coppeliasim_depth_normalize(),
@@ -127,7 +176,6 @@ exp_replace_arg_dict = dict_factory({
 
     # 'train_trans_b2': A.Compose([
     #     get_coppeliasim_depth_normalize(),
-    #     get_depth_aug(0.8, 2.5, is_train = True),
     #     multi_crop_stack(
     #         [(1280 - WINDOW_W_B2) // 2 + CENTER_XOF_B2, (1280 - WINDOW_W_B2) // 2 + LEFT_XOF_B2, (1280 - WINDOW_W_B2) // 2 + RIGHT_XOF_B2], 
     #         [(720 - WINDOW_W_B2) // 2 + CENTER_YOF_B2, (720 - WINDOW_W_B2) // 2 + LEFT_YOF_B2, (720 - WINDOW_W_B2) // 2 + RIGHT_YOF_B2], 
@@ -135,11 +183,11 @@ exp_replace_arg_dict = dict_factory({
     #         [(720 + WINDOW_W_B2) // 2 + CENTER_YOF_B2, (720 + WINDOW_W_B2) // 2 + LEFT_YOF_B2, (720 + WINDOW_W_B2) // 2 + RIGHT_YOF_B2], 
     #         T_SIZE_B2, T_SIZE_B2
     #     ),
+    #     get_depth_aug(0.8, 2.0, is_train = True),
     #     get_hwc2chw(False)
     # ]),
     # 'ext_trans_b2': A.Compose([
     #     get_coppeliasim_depth_normalize(),
-    #     get_depth_aug(0.8, 1.5, is_train = False),
     #     multi_crop_stack(
     #         [(1280 - WINDOW_W_B2) // 2 + CENTER_XOF_B2, (1280 - WINDOW_W_B2) // 2 + LEFT_XOF_B2, (1280 - WINDOW_W_B2) // 2 + RIGHT_XOF_B2], 
     #         [(720 - WINDOW_W_B2) // 2 + CENTER_YOF_B2, (720 - WINDOW_W_B2) // 2 + LEFT_YOF_B2, (720 - WINDOW_W_B2) // 2 + RIGHT_YOF_B2], 
@@ -147,31 +195,57 @@ exp_replace_arg_dict = dict_factory({
     #         [(720 + WINDOW_W_B2) // 2 + CENTER_YOF_B2, (720 + WINDOW_W_B2) // 2 + LEFT_YOF_B2, (720 + WINDOW_W_B2) // 2 + RIGHT_YOF_B2], 
     #         T_SIZE_B2, T_SIZE_B2
     #     ),
+    #     get_depth_aug(0.9, 1.2, is_train = False),
     #     get_hwc2chw(False)
     # ]),
 
-    'train_trans_corner': A.Compose([
+    # 'train_trans_corner': A.Compose([
+    #     get_coppeliasim_depth_normalize(),
+    #     get_crop_resize(
+    #         (1280 - 720) // 2, #  + CENTER_XOF,
+    #         (720 - 720) // 2 , # + CENTER_YOF, 
+    #         (1280 + 720) // 2, #  + CENTER_XOF,
+    #         (720 + 720) // 2 , # + CENTER_YOF, 
+    #         T_SIZE, T_SIZE
+    #     ),
+    #     get_depth_aug_single_view(0.8, 1.5, is_train = True),
+    #     get_hwc2chw(False)
+    # ]),
+    # 'ext_trans_corner': A.Compose([
+    #     get_coppeliasim_depth_normalize(),
+    #     get_crop_resize(
+    #         (1280 - 720) // 2, #  + CENTER_XOF,
+    #         (720 - 720) // 2 , # + CENTER_YOF, 
+    #         (1280 + 720) // 2, #  + CENTER_XOF,
+    #         (720 + 720) // 2 , # + CENTER_YOF, 
+    #         T_SIZE, T_SIZE
+    #     ),
+    #     get_depth_aug_single_view(0.9, 1, is_train = False),
+    #     get_hwc2chw(False)
+    # ]),
+
+    'train_trans_single': A.Compose([
         get_coppeliasim_depth_normalize(),
         get_crop_resize(
-            (1280 - WINDOW_W) // 2 + CENTER_XOF,
-            (720 - WINDOW_W) // 2 + CENTER_YOF, 
-            (1280 + WINDOW_W) // 2 + CENTER_XOF,
-            (720 + WINDOW_W) // 2 + CENTER_YOF, 
-            T_SIZE, T_SIZE
+            (1280 - SINGLE_W) // 2, #  + CENTER_XOF,
+            (720 - SINGLE_H) // 2 + SINGLE_Y_OFFSET, # + CENTER_YOF, 
+            (1280 + SINGLE_W) // 2, #  + CENTER_XOF,
+            (720 + SINGLE_H) // 2 + SINGLE_Y_OFFSET, # + CENTER_YOF, 
+            SINGLE_OUT_H, SINGLE_OUT_W
         ),
-        get_depth_aug_single_view(1, 1.5, is_train = True),
+        get_depth_aug_single_view(0.8, 1.8, is_train = True),
         get_hwc2chw(False)
     ]),
-    'ext_trans_corner': A.Compose([
+    'ext_trans_single': A.Compose([
         get_coppeliasim_depth_normalize(),
         get_crop_resize(
-            (1280 - WINDOW_W) // 2 + CENTER_XOF,
-            (720 - WINDOW_W) // 2 + CENTER_YOF, 
-            (1280 + WINDOW_W) // 2 + CENTER_XOF,
-            (720 + WINDOW_W) // 2 + CENTER_YOF, 
-            T_SIZE, T_SIZE
+            (1280 - SINGLE_W) // 2, #  + CENTER_XOF,
+            (720 - SINGLE_H) // 2 + SINGLE_Y_OFFSET, # + CENTER_YOF, 
+            (1280 + SINGLE_W) // 2, #  + CENTER_XOF,
+            (720 + SINGLE_H) // 2 + SINGLE_Y_OFFSET, # + CENTER_YOF, 
+            SINGLE_OUT_H, SINGLE_OUT_W
         ),
-        get_depth_aug_single_view(1, 1, is_train = False),
+        get_depth_aug_single_view(0.9, 1.2, is_train = False),
         get_hwc2chw(False)
     ]),
 
@@ -267,6 +341,9 @@ exp_exec_arg_dict = dict_factory({
     "make_effv1_backbone": lambda kwargs: make_effv1_backbone(
         kwargs["path"], channels = kwargs.get("channels", 3)
     ),
+    "make_effv1_direct": lambda kwargs: make_effv1_direct(
+        kwargs["path"], channels = kwargs.get("channels", 3)
+    ),
     "make_featcat_backbone": lambda kwargs: make_featcat_backbone(kwargs["path"]),
 
     "reward_dist_fn": lambda kwargs: RewardLinearDistance(kwargs["max_pos_dis_mm"], kwargs["max_rot_dis_deg"]),
@@ -312,6 +389,8 @@ exp_exec_arg_dict = dict_factory({
 
         is_attract_to_center = kwargs["is_attract_to_center"],
         is_square_align_reward = kwargs["is_square_align_reward"],
+
+        time_panelty = kwargs.get("time_panelty", -0.1)
     ),
     "maintain_cosine_lr": lambda kwargs: MaintainCosineLR(
         kwargs["lr"], kwargs["maintain_ratio"], kwargs["adjust_ratio"], kwargs["eta_min_rate"]

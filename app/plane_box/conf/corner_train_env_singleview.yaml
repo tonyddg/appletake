@@ -1,20 +1,25 @@
 train_env:
   type: 'src.gym_env.plane_box.corner:CornerEnv'
   kwargs:
+    obs_trans: "@train_trans_single"
+
     # corner_plane_height_offset_range: [-0.04, 0.36]
     corner_box_gap_range: [0, 0.010]
     corner_fixbox_size_range:
       - [0.12, 0.12, 0.12]
       - [0.30, 0.30, 0.20]
-
-    obs_trans: "@ext_trans"
-    
-  wrapper: 
+  wrapper:
     -
       type: 'src.sb3.vec_wrap:NetFeatObsWrapper'
       kwargs:
         "@net": 
           type: "make_effv1_backbone"
           kwargs:
-            path: "model/plane_box/ext/corner/best.pth"
+            channels: 1
+            path: "model/plane_box/ext_singleview/corner/best.pth"
         feat_dim: 1280
+
+eval_env:
+  is_base_on_train: True
+  kwargs:
+    obs_trans: "@ext_trans_single"
